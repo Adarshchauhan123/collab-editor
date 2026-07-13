@@ -250,6 +250,57 @@
   border-radius: var(--radius-full);
 }
 
+/* Access mode -- open vs restricted-to-team(s), picked before "New Meeting" */
+.access-mode-toggle {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  max-width: 420px;
+  margin-top: 4px;
+}
+
+.access-mode-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.access-mode-option:hover {
+  border-color: var(--border-accent);
+  color: var(--text-primary);
+}
+
+.access-mode-option.selected {
+  background: rgba(124,58,237,0.16);
+  border-color: var(--accent-primary);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.access-mode-option input[type="radio"] {
+  accent-color: var(--accent-primary);
+  width: 15px;
+  height: 15px;
+  margin: 0;
+}
+
+.invite-panel-hint {
+  font-size: 0.76rem;
+  color: var(--text-muted);
+  margin: -4px 0 8px;
+  font-style: italic;
+}
+
 /* Invite panel -- optional teams/individuals picker under "New Meeting" */
 .invite-panel-toggle {
   font-size: 0.82rem;

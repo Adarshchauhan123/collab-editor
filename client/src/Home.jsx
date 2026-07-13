@@ -21,6 +21,15 @@ function Home() {
   const [individualUsernames, setIndividualUsernames] = useState([]);
   const [individualInput, setIndividualInput] = useState("");
 
+  // Who's allowed to join. "open" (default) is today's behavior -- anyone
+  // with the meeting ID + passcode gets in, no questions asked, which is
+  // what keeps a plain "New Meeting" click zero-friction. "restricted"
+  // locks the door to just the selected team(s) (plus anyone invited
+  // individually, plus the host) -- picked when a host wants to run
+  // something like a real interview or a private study session without
+  // worrying about the link getting passed around.
+  const [accessMode, setAccessMode] = useState("open");
+
   // If we got here via Dashboard's "Start a meeting with this team"
   // button, that team should already be picked and the panel already
   // open -- not buried behind an extra click.
@@ -63,15 +72,25 @@ function Home() {
   // Meeting" click with nothing selected behaves exactly as it always has,
   // guest or logged in.
   async function createMeeting() {
+    if (accessMode === "restricted" && selectedTeamIds.length === 0) {
+      setError("Select at least one team to restrict this meeting to, or switch back to open.");
+      return;
+    }
+
     setCreating(true);
     setError("");
     try {
       const hasInvites = user && (selectedTeamIds.length > 0 || individualUsernames.length > 0);
-      const res = hasInvites
+      const isRestricted = user && accessMode === "restricted";
+      const res = hasInvites || isRestricted
         ? await authFetch("/api/rooms", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ inviteTeamIds: selectedTeamIds, inviteUsernames: individualUsernames }),
+            body: JSON.stringify({
+              inviteTeamIds: selectedTeamIds,
+              inviteUsernames: individualUsernames,
+              restrictToTeamIds: isRestricted ? selectedTeamIds : [],
+            }),
           })
         : await fetch(`${SERVER_URL}/api/rooms`, { method: "POST" });
       if (!res.ok) throw new Error("Server returned an error");
@@ -144,6 +163,32 @@ function Home() {
           </button>
 
           {user && (
+            <div className="access-mode-toggle">
+              <label className={`access-mode-option ${accessMode === "open" ? "selected" : ""}`}>
+                <input
+                  type="radio"
+                  name="accessMode"
+                  checked={accessMode === "open"}
+                  onChange={() => setAccessMode("open")}
+                />
+                Anyone with the link can join
+              </label>
+              <label className={`access-mode-option ${accessMode === "restricted" ? "selected" : ""}`}>
+                <input
+                  type="radio"
+                  name="accessMode"
+                  checked={accessMode === "restricted"}
+                  onChange={() => {
+                    setAccessMode("restricted");
+                    setShowInvitePanel(true);
+                  }}
+                />
+                Only selected team(s) can join
+              </label>
+            </div>
+          )}
+
+          {user && (
             <button
               type="button"
               className="link-button invite-panel-toggle"
@@ -153,6 +198,8 @@ function Home() {
                 ? "Hide invite options"
                 : selectedTeamIds.length + individualUsernames.length > 0
                 ? `${selectedTeamIds.length + individualUsernames.length} selected to invite — edit`
+                : accessMode === "restricted"
+                ? "+ Choose who's allowed in (required)"
                 : "+ Invite people to this meeting (optional)"}
             </button>
           )}
@@ -160,7 +207,14 @@ function Home() {
           {user && showInvitePanel && (
             <div className="invite-panel">
               <div className="invite-panel-section">
-                <div className="invite-panel-label">Invite teams</div>
+                <div className="invite-panel-label">
+                  {accessMode === "restricted" ? "Team(s) allowed to join" : "Invite teams"}
+                </div>
+                {accessMode === "restricted" && (
+                  <p className="invite-panel-hint">
+                    Only members of the team(s) you pick here (plus you) will be able to join this meeting.
+                  </p>
+                )}
                 {myTeams.length === 0 ? (
                   <p className="invite-panel-empty">
                     No teams yet — <Link to="/dashboard">create one from your Dashboard</Link>.

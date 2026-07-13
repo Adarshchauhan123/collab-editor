@@ -99,6 +99,17 @@ const roomUsers = new Map(); // roomId -> Map(socketId -> username)
 // when a room goes empty (unlike roomFiles/roomEditors/roomAIEnabled below).
 const roomPasscodes = new Map();
 
+// roomId -> Set(username) | undefined. Undefined (the default) means "open
+// meeting" -- anyone with the ID+passcode can join, exactly as this app has
+// always worked. When a host creates a meeting with accessMode "restricted",
+// this is set to the snapshot of who's allowed in (selected teams' accepted
+// members + individually invited usernames + the host themself), computed
+// ONCE at creation time -- not re-checked against live team membership, so
+// adding someone to a team later doesn't retroactively let them into a
+// meeting already running. Same lifetime rules as roomPasscodes: survives a
+// room going empty, never cleared by leaveCurrentRoom.
+const roomAllowedUsers = new Map();
+
 function generateMeetingId() {
   // 9-digit numeric, Zoom-style. This is just an identifier, not a secret —
   // the passcode below is what actually protects the room, so this doesn't
@@ -138,10 +149,11 @@ function normalizePath(rawPath, { isFolder } = {}) {
 // (individual registered users) both need a real account, since both are
 // just different ways of writing Invite records the caller owns.
 app.post("/api/rooms", async (req, res) => {
-  const { inviteTeamIds, inviteUsernames } = req.body || {};
+  const { inviteTeamIds, inviteUsernames, restrictToTeamIds } = req.body || {};
   const wantsInvites =
     (Array.isArray(inviteTeamIds) && inviteTeamIds.length > 0) ||
     (Array.isArray(inviteUsernames) && inviteUsernames.length > 0);
+  const wantsRestriction = Array.isArray(restrictToTeamIds) && restrictToTeamIds.length > 0;
 
   // Whoever is logged in when they create a meeting becomes its permanent
   // "owner" -- see roomOwner below. A guest (no token) can still create a
@@ -150,7 +162,7 @@ app.post("/api/rooms", async (req, res) => {
   // rooms.
   const creatorUsername = auth.verifyToken(auth.extractBearerToken(req));
 
-  if (wantsInvites && !creatorUsername) {
+  if ((wantsInvites || wantsRestriction) && !creatorUsername) {
     return res.status(401).json({ error: "Log in to invite teams or people to a meeting." });
   }
 
@@ -189,7 +201,22 @@ app.post("/api/rooms", async (req, res) => {
     }
   }
 
-  res.json({ roomId, passcode, invitedTeamCount, individualResults });
+  if (creatorUsername && wantsRestriction) {
+    // Snapshot who's allowed: accepted members of the chosen team(s), any
+    // individually invited usernames, and the host -- resolved via
+    // listTeamsForHost so a host can only restrict to teams they actually
+    // own, same ownership scoping as every other teams.js call.
+    const hostTeams = await teams.listTeamsForHost(creatorUsername);
+    const chosenTeams = hostTeams.filter((t) => restrictToTeamIds.includes(t.id));
+    const allowed = new Set([creatorUsername]);
+    chosenTeams.forEach((t) => t.members.forEach((m) => allowed.add(m)));
+    if (Array.isArray(inviteUsernames)) {
+      inviteUsernames.forEach((u) => typeof u === "string" && u.trim() && allowed.add(u.trim()));
+    }
+    roomAllowedUsers.set(roomId, allowed);
+  }
+
+  res.json({ roomId, passcode, invitedTeamCount, individualResults, restricted: !!(creatorUsername && wantsRestriction) });
 });
 
 // --- Host & permissions (Day 5+) ---
@@ -405,6 +432,21 @@ io.on("connection", (socket) => {
       return;
     }
 
+    // Identity is resolved here, BEFORE leaving whatever room this socket
+    // was already in, so a restricted-meeting rejection below (like the
+    // passcode check above) doesn't first kick the socket out of a room it
+    // was validly in. Token wins over the client-supplied `username` for
+    // logged-in users -- see the longer note further down on why.
+    const verifiedUsername = auth.verifyToken(token);
+    const isAuthenticated = !!verifiedUsername;
+    const candidateUsername = verifiedUsername || (username || "Anonymous").trim() || "Anonymous";
+
+    const allowedUsers = roomAllowedUsers.get(roomId);
+    if (allowedUsers && (!isAuthenticated || !allowedUsers.has(candidateUsername))) {
+      socket.emit("join-error", "This meeting is restricted — ask the host to invite you.");
+      return;
+    }
+
     // Validated — now it's safe to leave whatever room we were in before.
     if (currentRoom) leaveCurrentRoom();
 
@@ -432,14 +474,12 @@ io.on("connection", (socket) => {
 
     currentRoom = roomId;
 
-    // Identity: if a valid JWT came along, the username is taken from the
-    // TOKEN, never from whatever the client sent in `username` — otherwise
-    // a logged-in session could be spoofed into acting as any account just
-    // by editing a form field before it's sent. Guests (no token) still
-    // just type a name, exactly as before this feature existed.
-    const verifiedUsername = auth.verifyToken(token);
-    const isAuthenticated = !!verifiedUsername;
-    currentUsername = verifiedUsername || (username || "Anonymous").trim() || "Anonymous";
+    // Identity was already resolved (and, for restricted meetings, checked)
+    // above, before we touched leaveCurrentRoom -- see the longer note up
+    // there. Token wins over the client-supplied `username` for logged-in
+    // users, so a session can't be spoofed into acting as another account
+    // just by editing a form field before it's sent.
+    currentUsername = candidateUsername;
 
     socket.join(roomId);
 
