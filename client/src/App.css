@@ -301,6 +301,52 @@
   font-style: italic;
 }
 
+.auto-team-panel {
+  width: 100%;
+  max-width: 420px;
+  margin-top: 2px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  border: 1px dashed var(--border-subtle);
+  background: var(--bg-glass);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  text-align: left;
+}
+
+.auto-team-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.auto-team-checkbox input[type="checkbox"] {
+  accent-color: var(--accent-primary);
+  width: 15px;
+  height: 15px;
+  margin: 0;
+}
+
+.auto-team-name-input {
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-default);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font-size: 0.85rem;
+  font-family: var(--font-sans);
+}
+
+.auto-team-name-input:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+}
+
 /* Invite panel -- optional teams/individuals picker under "New Meeting" */
 .invite-panel-toggle {
   font-size: 0.82rem;

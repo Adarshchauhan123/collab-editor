@@ -638,6 +638,41 @@
   font-size: 0.875rem;
 }
 
+.permissions-item-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 10px;
+  cursor: default;
+}
+
+.permissions-item-row label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.kick-btn {
+  font-size: 0.72rem;
+  font-weight: 600;
+  font-family: var(--font-sans);
+  padding: 3px 10px;
+  border-radius: var(--radius-full);
+  border: 1px solid rgba(244,63,94,0.35);
+  background: transparent;
+  color: var(--tint-rose);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.kick-btn:hover {
+  background: rgba(244,63,94,0.14);
+  border-color: rgba(244,63,94,0.6);
+}
+
 .ai-toggle {
   margin-top: 12px;
   padding-top: 12px;

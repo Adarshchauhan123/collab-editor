@@ -290,6 +290,16 @@ function Room() {
       setHasJoined(false);
     }
 
+    // The host removed us. Routed through the exact same path as a failed
+    // join (setHasJoined(false) drops `hasJoined` out of this effect's
+    // dependency array, which tears down every listener below AND skips
+    // re-registering "connect" -> joinRoom -- otherwise the persistent
+    // socket's auto-reconnect would silently walk us right back in a
+    // moment later, making "kick" a no-op).
+    function handleKicked() {
+      handleJoinError("You were removed from this meeting by the host.");
+    }
+
     function showToast(message) {
       setToast(message);
       clearTimeout(toastTimer.current);
@@ -341,6 +351,7 @@ function Room() {
     socket.on("run-access", handleRunAccess);
     socket.on("run-result", handleRunResult);
     socket.on("join-error", handleJoinError);
+    socket.on("kicked", handleKicked);
     socket.on("user-joined", handleUserJoined);
     socket.on("user-left", handleUserLeft);
     socket.on("cursor-move", handleCursorMove);
@@ -367,6 +378,7 @@ function Room() {
       socket.off("run-access", handleRunAccess);
       socket.off("run-result", handleRunResult);
       socket.off("join-error", handleJoinError);
+      socket.off("kicked", handleKicked);
       socket.off("user-joined", handleUserJoined);
       socket.off("user-left", handleUserLeft);
       socket.off("cursor-move", handleCursorMove);
@@ -553,6 +565,11 @@ function Room() {
 
   function toggleUserAccess(name, nextCanEdit) {
     socket.emit("set-permission", { username: name, canEdit: nextCanEdit });
+  }
+
+  function kickUser(name) {
+    if (!window.confirm(`Remove ${name} from this meeting? They can rejoin later with the meeting ID and passcode unless this meeting is restricted.`)) return;
+    socket.emit("kick-user", { username: name });
   }
 
   function toggleAIAccess(enabledForAll) {
@@ -1310,14 +1327,24 @@ function Room() {
                         .map((name, i) => {
                           const allowed = editors.includes(name);
                           return (
-                            <label className="permissions-item" key={`${name}-${i}`}>
-                              <input
-                                type="checkbox"
-                                checked={allowed}
-                                onChange={(e) => toggleUserAccess(name, e.target.checked)}
-                              />
-                              {name} can edit
-                            </label>
+                            <div className="permissions-item permissions-item-row" key={`${name}-${i}`}>
+                              <label>
+                                <input
+                                  type="checkbox"
+                                  checked={allowed}
+                                  onChange={(e) => toggleUserAccess(name, e.target.checked)}
+                                />
+                                {name} can edit
+                              </label>
+                              <button
+                                type="button"
+                                className="kick-btn"
+                                title={`Remove ${name} from this meeting`}
+                                onClick={() => kickUser(name)}
+                              >
+                                Kick
+                              </button>
+                            </div>
                           );
                         })}
                       {users.length <= 1 && <span className="permissions-empty">No one else here yet.</span>}

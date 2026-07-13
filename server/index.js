@@ -110,6 +110,15 @@ const roomPasscodes = new Map();
 // room going empty, never cleared by leaveCurrentRoom.
 const roomAllowedUsers = new Map();
 
+// roomId -> teamId. Set when a host creates an OPEN meeting with the
+// optional "automatically add everyone who joins to a team" box checked
+// (see POST /api/rooms). Unlike roomAllowedUsers (a gate), this is a
+// roster-builder: it doesn't restrict who can join, it just means every
+// authenticated person who successfully joins gets added straight into
+// that team's members (see join-room). Same never-cleared lifetime as
+// roomPasscodes/roomAllowedUsers.
+const roomAutoTeam = new Map();
+
 function generateMeetingId() {
   // 9-digit numeric, Zoom-style. This is just an identifier, not a secret —
   // the passcode below is what actually protects the room, so this doesn't
@@ -149,11 +158,12 @@ function normalizePath(rawPath, { isFolder } = {}) {
 // (individual registered users) both need a real account, since both are
 // just different ways of writing Invite records the caller owns.
 app.post("/api/rooms", async (req, res) => {
-  const { inviteTeamIds, inviteUsernames, restrictToTeamIds } = req.body || {};
+  const { inviteTeamIds, inviteUsernames, restrictToTeamIds, autoTeamName } = req.body || {};
   const wantsInvites =
     (Array.isArray(inviteTeamIds) && inviteTeamIds.length > 0) ||
     (Array.isArray(inviteUsernames) && inviteUsernames.length > 0);
   const wantsRestriction = Array.isArray(restrictToTeamIds) && restrictToTeamIds.length > 0;
+  const wantsAutoTeam = typeof autoTeamName === "string" && autoTeamName.trim().length > 0;
 
   // Whoever is logged in when they create a meeting becomes its permanent
   // "owner" -- see roomOwner below. A guest (no token) can still create a
@@ -162,7 +172,7 @@ app.post("/api/rooms", async (req, res) => {
   // rooms.
   const creatorUsername = auth.verifyToken(auth.extractBearerToken(req));
 
-  if ((wantsInvites || wantsRestriction) && !creatorUsername) {
+  if ((wantsInvites || wantsRestriction || wantsAutoTeam) && !creatorUsername) {
     return res.status(401).json({ error: "Log in to invite teams or people to a meeting." });
   }
 
@@ -216,7 +226,25 @@ app.post("/api/rooms", async (req, res) => {
     roomAllowedUsers.set(roomId, allowed);
   }
 
-  res.json({ roomId, passcode, invitedTeamCount, individualResults, restricted: !!(creatorUsername && wantsRestriction) });
+  let resolvedAutoTeamName = null;
+  if (creatorUsername && wantsAutoTeam) {
+    try {
+      const team = await teams.findOrCreateTeamByName(creatorUsername, autoTeamName);
+      roomAutoTeam.set(roomId, team.id);
+      resolvedAutoTeamName = team.name;
+    } catch (err) {
+      console.warn(`Failed to set up auto-team for ${creatorUsername}:`, err.message);
+    }
+  }
+
+  res.json({
+    roomId,
+    passcode,
+    invitedTeamCount,
+    individualResults,
+    restricted: !!(creatorUsername && wantsRestriction),
+    autoTeamName: resolvedAutoTeamName,
+  });
 });
 
 // --- Host & permissions (Day 5+) ---
@@ -489,6 +517,13 @@ io.on("connection", (socket) => {
     if (isAuthenticated) {
       if (!roomParticipants.has(roomId)) roomParticipants.set(roomId, new Set());
       roomParticipants.get(roomId).add(currentUsername);
+
+      // Open meeting with "auto-add everyone who joins to a team" turned
+      // on at creation -- see POST /api/rooms. Fire-and-forget: a slow or
+      // failed DB write here shouldn't hold up the join itself, same
+      // reasoning as the old (now-removed) join-room team hook.
+      const autoTeamId = roomAutoTeam.get(roomId);
+      if (autoTeamId) teams.addMemberDirect(autoTeamId, currentUsername);
     }
 
     // First person into a room (since server start, or since it last went
@@ -608,6 +643,32 @@ io.on("connection", (socket) => {
     else editors.delete(username);
 
     broadcastPermissions(currentRoom);
+  });
+
+  // Host-only: force a currently-connected participant out of the LIVE
+  // meeting right now -- distinct from the Dashboard's "remove from team"
+  // (that's roster management for later; this is "get them off this call
+  // immediately"). Kicks every socket this username holds in the room (in
+  // case of multiple tabs/devices), by disconnecting them outright rather
+  // than just removing them from `roomUsers` -- a soft removal would leave
+  // their client sitting there with a stale "joined" view. The client-side
+  // "kicked" handler is what actually prevents them from silently
+  // auto-rejoining via the socket's normal reconnect behavior.
+  socket.on("kick-user", ({ username }) => {
+    if (!currentRoom) return;
+    if (roomHost.get(currentRoom) !== currentUsername) return; // not the host — ignore
+    if (username === currentUsername) return; // can't kick yourself
+
+    const users = roomUsers.get(currentRoom);
+    if (!users) return;
+    for (const [socketId, uname] of users.entries()) {
+      if (uname !== username) continue;
+      const targetSocket = io.sockets.sockets.get(socketId);
+      if (targetSocket) {
+        targetSocket.emit("kicked");
+        targetSocket.disconnect(true);
+      }
+    }
   });
 
   // Host-only: open or close AI help to everyone in the room.

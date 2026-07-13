@@ -51,6 +51,40 @@ async function listTeamsForMember(username) {
   }
 }
 
+function escapeRegex(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Used by the "open meeting + team name" auto-roster flow on the New
+// Meeting form: a host names a team right there instead of picking one
+// that already exists. Reuses an existing team of that exact name (case-
+// insensitive) if the host already has one -- e.g. a recurring "Weekly
+// Standup" meeting shouldn't spawn a fresh duplicate team every time --
+// otherwise creates it fresh.
+async function findOrCreateTeamByName(hostUsername, name) {
+  if (!db.isConnected()) throw new Error("Teams aren't available right now — MONGODB_URI isn't set.");
+  const trimmed = (name || "").trim().slice(0, 60);
+  if (!trimmed) throw new Error("Team name can't be empty.");
+  let team = await Team.findOne({ hostUsername, name: new RegExp(`^${escapeRegex(trimmed)}$`, "i") });
+  if (!team) team = await Team.create({ hostUsername, name: trimmed, members: [], pending: [] });
+  return serializeTeam(team);
+}
+
+// Adds someone straight into `members`, skipping the usual pending/accept
+// step -- used ONLY for the auto-roster case above. There, joining the
+// meeting itself (which the host set up to say "everyone here joins Team
+// X") IS the consent; a separate accept click would be redundant. Every
+// other path that adds a member (addPendingTeamMember, respondToTeamInvite)
+// still goes through pending first.
+async function addMemberDirect(teamId, username) {
+  if (!db.isConnected() || !username) return;
+  try {
+    await Team.updateOne({ _id: teamId }, { $addToSet: { members: username }, $pull: { pending: username } });
+  } catch (err) {
+    console.warn(`Failed to auto-add ${username} to team ${teamId}:`, err.message);
+  }
+}
+
 async function createTeam(hostUsername, name) {
   if (!db.isConnected()) throw new Error("Teams aren't available right now — MONGODB_URI isn't set.");
   const trimmed = (name || "").trim().slice(0, 60);
@@ -216,4 +250,6 @@ module.exports = {
   respondToTeamInvite,
   mergeTeams,
   bulkInviteTeams,
+  findOrCreateTeamByName,
+  addMemberDirect,
 };

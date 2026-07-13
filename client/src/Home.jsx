@@ -30,6 +30,15 @@ function Home() {
   // worrying about the link getting passed around.
   const [accessMode, setAccessMode] = useState("open");
 
+  // Only meaningful when accessMode is "open": optionally auto-add every
+  // authenticated person who joins this meeting into a named team, so a
+  // recurring open meeting (e.g. a weekly open study room) builds its own
+  // roster over time without the host manually adding people afterward.
+  // Off by default -- same "opt in, don't get in the way" rule as
+  // everything else on this form.
+  const [autoTeamEnabled, setAutoTeamEnabled] = useState(false);
+  const [autoTeamName, setAutoTeamName] = useState("");
+
   // If we got here via Dashboard's "Start a meeting with this team"
   // button, that team should already be picked and the panel already
   // open -- not buried behind an extra click.
@@ -76,13 +85,18 @@ function Home() {
       setError("Select at least one team to restrict this meeting to, or switch back to open.");
       return;
     }
+    if (accessMode === "open" && autoTeamEnabled && !autoTeamName.trim()) {
+      setError("Enter a team name for auto-add, or turn that option off.");
+      return;
+    }
 
     setCreating(true);
     setError("");
     try {
       const hasInvites = user && (selectedTeamIds.length > 0 || individualUsernames.length > 0);
       const isRestricted = user && accessMode === "restricted";
-      const res = hasInvites || isRestricted
+      const hasAutoTeam = user && accessMode === "open" && autoTeamEnabled && autoTeamName.trim();
+      const res = hasInvites || isRestricted || hasAutoTeam
         ? await authFetch("/api/rooms", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -90,6 +104,7 @@ function Home() {
               inviteTeamIds: selectedTeamIds,
               inviteUsernames: individualUsernames,
               restrictToTeamIds: isRestricted ? selectedTeamIds : [],
+              autoTeamName: hasAutoTeam ? autoTeamName.trim() : "",
             }),
           })
         : await fetch(`${SERVER_URL}/api/rooms`, { method: "POST" });
@@ -185,6 +200,28 @@ function Home() {
                 />
                 Only selected team(s) can join
               </label>
+            </div>
+          )}
+
+          {user && accessMode === "open" && (
+            <div className="auto-team-panel">
+              <label className="auto-team-checkbox">
+                <input
+                  type="checkbox"
+                  checked={autoTeamEnabled}
+                  onChange={(e) => setAutoTeamEnabled(e.target.checked)}
+                />
+                Automatically add everyone who joins to a team
+              </label>
+              {autoTeamEnabled && (
+                <input
+                  className="auto-team-name-input"
+                  value={autoTeamName}
+                  onChange={(e) => setAutoTeamName(e.target.value)}
+                  placeholder="Team name (required)"
+                  maxLength={60}
+                />
+              )}
             </div>
           )}
 
