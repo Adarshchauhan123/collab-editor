@@ -109,7 +109,14 @@ function Home() {
           })
         : await fetch(`${SERVER_URL}/api/rooms`, { method: "POST" });
       if (!res.ok) throw new Error("Server returned an error");
-      const { roomId, passcode } = await res.json();
+      const { roomId, passcode, autoTeamError } = await res.json();
+      if (hasAutoTeam && autoTeamError) {
+        // The meeting itself still got created fine -- only the
+        // auto-add-to-team setup failed (most likely MongoDB isn't
+        // configured on this deploy). Tell the host now, not never --
+        // otherwise they'd have no idea nobody's actually being added.
+        window.alert(`Meeting created, but "auto-add to team" couldn't be set up: ${autoTeamError}\n\nPeople can still join normally, they just won't be added to a team.`);
+      }
       navigate(`/room/${roomId}?pwd=${passcode}`);
     } catch (err) {
       setError("Could not reach the server. Is it running?");

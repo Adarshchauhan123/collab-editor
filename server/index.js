@@ -114,8 +114,9 @@ const roomAllowedUsers = new Map();
 // optional "automatically add everyone who joins to a team" box checked
 // (see POST /api/rooms). Unlike roomAllowedUsers (a gate), this is a
 // roster-builder: it doesn't restrict who can join, it just means every
-// authenticated person who successfully joins gets added straight into
-// that team's members (see join-room). Same never-cleared lifetime as
+// authenticated person who successfully joins gets PROPOSED for that
+// team (pending, shown on their own Dashboard under "Team invites" to
+// accept or decline -- see join-room). Same never-cleared lifetime as
 // roomPasscodes/roomAllowedUsers.
 const roomAutoTeam = new Map();
 
@@ -227,6 +228,7 @@ app.post("/api/rooms", async (req, res) => {
   }
 
   let resolvedAutoTeamName = null;
+  let autoTeamError = null;
   if (creatorUsername && wantsAutoTeam) {
     try {
       const team = await teams.findOrCreateTeamByName(creatorUsername, autoTeamName);
@@ -234,6 +236,11 @@ app.post("/api/rooms", async (req, res) => {
       resolvedAutoTeamName = team.name;
     } catch (err) {
       console.warn(`Failed to set up auto-team for ${creatorUsername}:`, err.message);
+      // Surfaced to the host below -- previously this failed silently, so
+      // a host could check "auto-add to team" and never find out it
+      // didn't actually get set up (e.g. MongoDB not configured on this
+      // deploy) until people who joined never showed up anywhere.
+      autoTeamError = err.message;
     }
   }
 
@@ -242,6 +249,7 @@ app.post("/api/rooms", async (req, res) => {
     passcode,
     invitedTeamCount,
     individualResults,
+    autoTeamError,
     restricted: !!(creatorUsername && wantsRestriction),
     autoTeamName: resolvedAutoTeamName,
   });
@@ -519,11 +527,17 @@ io.on("connection", (socket) => {
       roomParticipants.get(roomId).add(currentUsername);
 
       // Open meeting with "auto-add everyone who joins to a team" turned
-      // on at creation -- see POST /api/rooms. Fire-and-forget: a slow or
-      // failed DB write here shouldn't hold up the join itself, same
-      // reasoning as the old (now-removed) join-room team hook.
+      // on at creation -- see POST /api/rooms. This proposes membership
+      // (pending, shows up under the joiner's "Team invites" with
+      // Accept/Decline) rather than adding them outright -- same consent
+      // rule as every other way someone ends up on a team in this app.
+      // Fire-and-forget: a slow or failed DB write here shouldn't hold up
+      // the join itself.
       const autoTeamId = roomAutoTeam.get(roomId);
-      if (autoTeamId) teams.addMemberDirect(autoTeamId, currentUsername);
+      if (autoTeamId) {
+        const teamOwner = roomOwner.get(roomId);
+        if (teamOwner) teams.addPendingTeamMember(teamOwner, autoTeamId, currentUsername);
+      }
     }
 
     // First person into a room (since server start, or since it last went

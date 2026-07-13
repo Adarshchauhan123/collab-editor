@@ -70,21 +70,6 @@ async function findOrCreateTeamByName(hostUsername, name) {
   return serializeTeam(team);
 }
 
-// Adds someone straight into `members`, skipping the usual pending/accept
-// step -- used ONLY for the auto-roster case above. There, joining the
-// meeting itself (which the host set up to say "everyone here joins Team
-// X") IS the consent; a separate accept click would be redundant. Every
-// other path that adds a member (addPendingTeamMember, respondToTeamInvite)
-// still goes through pending first.
-async function addMemberDirect(teamId, username) {
-  if (!db.isConnected() || !username) return;
-  try {
-    await Team.updateOne({ _id: teamId }, { $addToSet: { members: username }, $pull: { pending: username } });
-  } catch (err) {
-    console.warn(`Failed to auto-add ${username} to team ${teamId}:`, err.message);
-  }
-}
-
 async function createTeam(hostUsername, name) {
   if (!db.isConnected()) throw new Error("Teams aren't available right now — MONGODB_URI isn't set.");
   const trimmed = (name || "").trim().slice(0, 60);
@@ -251,5 +236,4 @@ module.exports = {
   mergeTeams,
   bulkInviteTeams,
   findOrCreateTeamByName,
-  addMemberDirect,
 };
