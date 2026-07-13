@@ -37,6 +37,11 @@ function Home() {
   // Off by default -- same "opt in, don't get in the way" rule as
   // everything else on this form.
   const [autoTeamEnabled, setAutoTeamEnabled] = useState(false);
+  // Empty string = "create a new team" (autoTeamName below is used). Any
+  // other value = the id of one of the host's existing teams (myTeams),
+  // picked from the dropdown instead of typing a fresh name -- avoids
+  // accidentally spawning a near-duplicate of a team that already exists.
+  const [autoTeamId, setAutoTeamId] = useState("");
   const [autoTeamName, setAutoTeamName] = useState("");
 
   // If we got here via Dashboard's "Start a meeting with this team"
@@ -85,8 +90,8 @@ function Home() {
       setError("Select at least one team to restrict this meeting to, or switch back to open.");
       return;
     }
-    if (accessMode === "open" && autoTeamEnabled && !autoTeamName.trim()) {
-      setError("Enter a team name for auto-add, or turn that option off.");
+    if (accessMode === "open" && autoTeamEnabled && !autoTeamId && !autoTeamName.trim()) {
+      setError("Choose an existing team or enter a name for a new one, or turn auto-add off.");
       return;
     }
 
@@ -95,7 +100,7 @@ function Home() {
     try {
       const hasInvites = user && (selectedTeamIds.length > 0 || individualUsernames.length > 0);
       const isRestricted = user && accessMode === "restricted";
-      const hasAutoTeam = user && accessMode === "open" && autoTeamEnabled && autoTeamName.trim();
+      const hasAutoTeam = user && accessMode === "open" && autoTeamEnabled && (autoTeamId || autoTeamName.trim());
       const res = hasInvites || isRestricted || hasAutoTeam
         ? await authFetch("/api/rooms", {
             method: "POST",
@@ -104,7 +109,8 @@ function Home() {
               inviteTeamIds: selectedTeamIds,
               inviteUsernames: individualUsernames,
               restrictToTeamIds: isRestricted ? selectedTeamIds : [],
-              autoTeamName: hasAutoTeam ? autoTeamName.trim() : "",
+              autoTeamId: hasAutoTeam && autoTeamId ? autoTeamId : "",
+              autoTeamName: hasAutoTeam && !autoTeamId ? autoTeamName.trim() : "",
             }),
           })
         : await fetch(`${SERVER_URL}/api/rooms`, { method: "POST" });
@@ -221,13 +227,31 @@ function Home() {
                 Automatically add everyone who joins to a team
               </label>
               {autoTeamEnabled && (
-                <input
-                  className="auto-team-name-input"
-                  value={autoTeamName}
-                  onChange={(e) => setAutoTeamName(e.target.value)}
-                  placeholder="Team name (required)"
-                  maxLength={60}
-                />
+                <>
+                  {myTeams.length > 0 && (
+                    <select
+                      className="auto-team-select"
+                      value={autoTeamId}
+                      onChange={(e) => setAutoTeamId(e.target.value)}
+                    >
+                      <option value="">+ Create a new team…</option>
+                      {myTeams.map((team) => (
+                        <option key={team.id} value={team.id}>
+                          {team.name} ({team.members.length} member{team.members.length === 1 ? "" : "s"})
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  {!autoTeamId && (
+                    <input
+                      className="auto-team-name-input"
+                      value={autoTeamName}
+                      onChange={(e) => setAutoTeamName(e.target.value)}
+                      placeholder="New team name (required)"
+                      maxLength={60}
+                    />
+                  )}
+                </>
               )}
             </div>
           )}

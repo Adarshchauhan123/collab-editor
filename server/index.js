@@ -159,12 +159,14 @@ function normalizePath(rawPath, { isFolder } = {}) {
 // (individual registered users) both need a real account, since both are
 // just different ways of writing Invite records the caller owns.
 app.post("/api/rooms", async (req, res) => {
-  const { inviteTeamIds, inviteUsernames, restrictToTeamIds, autoTeamName } = req.body || {};
+  const { inviteTeamIds, inviteUsernames, restrictToTeamIds, autoTeamName, autoTeamId } = req.body || {};
   const wantsInvites =
     (Array.isArray(inviteTeamIds) && inviteTeamIds.length > 0) ||
     (Array.isArray(inviteUsernames) && inviteUsernames.length > 0);
   const wantsRestriction = Array.isArray(restrictToTeamIds) && restrictToTeamIds.length > 0;
-  const wantsAutoTeam = typeof autoTeamName === "string" && autoTeamName.trim().length > 0;
+  const wantsAutoTeam =
+    (typeof autoTeamName === "string" && autoTeamName.trim().length > 0) ||
+    (typeof autoTeamId === "string" && autoTeamId.trim().length > 0);
 
   // Whoever is logged in when they create a meeting becomes its permanent
   // "owner" -- see roomOwner below. A guest (no token) can still create a
@@ -231,7 +233,19 @@ app.post("/api/rooms", async (req, res) => {
   let autoTeamError = null;
   if (creatorUsername && wantsAutoTeam) {
     try {
-      const team = await teams.findOrCreateTeamByName(creatorUsername, autoTeamName);
+      let team;
+      if (typeof autoTeamId === "string" && autoTeamId.trim()) {
+        // Picked one of the host's existing teams instead of typing a new
+        // name -- resolved via listTeamsForHost so a host can only wire an
+        // auto-add meeting up to a team they actually own, same ownership
+        // scoping as every other teams.js call (e.g. restrictToTeamIds
+        // above).
+        const hostTeams = await teams.listTeamsForHost(creatorUsername);
+        team = hostTeams.find((t) => t.id === autoTeamId.trim());
+        if (!team) throw new Error("That team wasn't found.");
+      } else {
+        team = await teams.findOrCreateTeamByName(creatorUsername, autoTeamName);
+      }
       roomAutoTeam.set(roomId, team.id);
       resolvedAutoTeamName = team.name;
     } catch (err) {
