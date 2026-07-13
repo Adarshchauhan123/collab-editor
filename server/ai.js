@@ -25,17 +25,22 @@ function buildPrompt({ question, code, language }) {
   );
 }
 
-// Returns { answer } on success, or { error } on failure. Never throws —
-// callers (the socket handler in index.js) can just check which key is
-// present rather than wrapping every call in try/catch themselves.
-async function askAI({ question, code, language }) {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    return { error: "The AI helper isn't configured yet — ask the project owner to add a GEMINI_API_KEY (see README)." };
-  }
+const REQUEST_TIMEOUT_MS = 45000; // see comment below on why 45s, not 20s
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// One attempt at the actual HTTP call. Split out from askAI so retrying
+// (below) is just "call this again" instead of duplicating the whole
+// fetch/timeout/parse dance.
+async function attemptRequest({ apiKey, question, code, language }) {
+  // 45s, not 20s: gemini-3.5-flash has "thinking" (extended reasoning)
+  // enabled by default, and a genuinely thoughtful answer to a coding
+  // question can take noticeably longer than a simple prompt would --
+  // 20s was cutting some real, in-progress requests off early.
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 20000);
+  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
   try {
     const res = await fetch(GEMINI_URL, {
@@ -52,24 +57,54 @@ async function askAI({ question, code, language }) {
 
     if (!res.ok) {
       const text = await res.text();
-      return { error: `AI service returned ${res.status}: ${text.slice(0, 200)}` };
+      return { ok: false, status: res.status, error: `AI service returned ${res.status}: ${text.slice(0, 200)}` };
     }
 
     const data = await res.json();
     const answer = data?.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!answer) {
-      return { error: "AI service returned an empty response." };
+      return { ok: false, status: res.status, error: "AI service returned an empty response." };
     }
 
-    return { answer };
+    return { ok: true, answer };
   } catch (err) {
     if (err.name === "AbortError") {
-      return { error: "AI request timed out after 20 seconds." };
+      return { ok: false, error: `AI request timed out after ${REQUEST_TIMEOUT_MS / 1000} seconds.` };
     }
-    return { error: "Failed to reach the AI service." };
+    return { ok: false, error: "Failed to reach the AI service." };
   } finally {
     clearTimeout(timeoutId);
   }
+}
+
+// Returns { answer } on success, or { error } on failure. Never throws —
+// callers (the socket handler in index.js) can just check which key is
+// present rather than wrapping every call in try/catch themselves.
+//
+// Retries automatically (twice, with a short backoff) ONLY on a 503 --
+// that specific status is Gemini's own "this model is overloaded right
+// now, temporary, try again" signal, which clears up within a few seconds
+// often enough that silently retrying beats making someone manually hit
+// "Ask" again. Every other failure (bad key, timeout, network error)
+// returns immediately -- retrying those wouldn't help.
+async function askAI({ question, code, language }) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    return { error: "The AI helper isn't configured yet — ask the project owner to add a GEMINI_API_KEY (see README)." };
+  }
+
+  const delays = [1500, 3000]; // two retries, backing off
+  let lastError = "Failed to reach the AI service.";
+
+  for (let attempt = 0; attempt <= delays.length; attempt++) {
+    const result = await attemptRequest({ apiKey, question, code, language });
+    if (result.ok) return { answer: result.answer };
+    lastError = result.error;
+    if (result.status !== 503 || attempt === delays.length) break;
+    await sleep(delays[attempt]);
+  }
+
+  return { error: lastError };
 }
 
 module.exports = { askAI };
