@@ -229,18 +229,28 @@ function Home() {
               {autoTeamEnabled && (
                 <>
                   {myTeams.length > 0 && (
-                    <select
-                      className="auto-team-select"
-                      value={autoTeamId}
-                      onChange={(e) => setAutoTeamId(e.target.value)}
-                    >
-                      <option value="">+ Create a new team…</option>
+                    <div className="invite-team-pills">
+                      <button
+                        type="button"
+                        className={`invite-team-pill ${!autoTeamId ? "selected" : ""}`}
+                        onClick={() => setAutoTeamId("")}
+                      >
+                        {!autoTeamId && <span className="invite-pill-check">✓</span>}
+                        + Create a new team
+                      </button>
                       {myTeams.map((team) => (
-                        <option key={team.id} value={team.id}>
-                          {team.name} ({team.members.length} member{team.members.length === 1 ? "" : "s"})
-                        </option>
+                        <button
+                          type="button"
+                          key={team.id}
+                          className={`invite-team-pill ${autoTeamId === team.id ? "selected" : ""}`}
+                          onClick={() => setAutoTeamId(team.id)}
+                        >
+                          {autoTeamId === team.id && <span className="invite-pill-check">✓</span>}
+                          {team.name}
+                          <span className="invite-pill-count">{team.members.length}</span>
+                        </button>
                       ))}
-                    </select>
+                    </div>
                   )}
                   {!autoTeamId && (
                     <input

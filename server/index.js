@@ -1027,16 +1027,19 @@ app.post("/api/teams/:teamId/respond", auth.requireAuth, async (req, res) => {
 // which is ephemeral and scoped to one meeting. Recipients are always
 // resolved server-side from the host's OWN teams (never trusted directly
 // from the client), same ownership-scoping principle as every other
-// mutating teams.js call: a host can only ever message people who are
-// actually in a team they own.
+// mutating teams.js call: a host can only ever BROADCAST to a team they
+// own. Individual/group messaging ("people" mode) is deliberately more
+// open -- a host can message any registered username, not just their own
+// teams' members (messages.sendMessage still checks every username is a
+// real account, same as the individual meeting-invite flow).
 app.post("/api/messages", auth.requireAuth, async (req, res) => {
   const { recipientType, teamId, usernames, text } = req.body || {};
   try {
-    const hostTeams = await teams.listTeamsForHost(req.username);
     let toUsernames;
     let teamName = null;
 
     if (recipientType === "team") {
+      const hostTeams = await teams.listTeamsForHost(req.username);
       const team = hostTeams.find((t) => t.id === teamId);
       if (!team) return res.status(404).json({ error: "Team not found." });
       toUsernames = team.members;
@@ -1044,14 +1047,6 @@ app.post("/api/messages", auth.requireAuth, async (req, res) => {
     } else if (recipientType === "people") {
       if (!Array.isArray(usernames) || usernames.length === 0) {
         return res.status(400).json({ error: "Pick at least one person." });
-      }
-      // The chosen usernames must all actually be accepted members of SOME
-      // team this host owns -- keeps this a "message my own people" tool,
-      // not an open door to message any registered username.
-      const allMyMembers = new Set(hostTeams.flatMap((t) => t.members));
-      const invalid = usernames.filter((u) => !allMyMembers.has(u));
-      if (invalid.length > 0) {
-        return res.status(400).json({ error: `${invalid.join(", ")} ${invalid.length === 1 ? "isn't" : "aren't"} a member of any of your teams.` });
       }
       toUsernames = usernames;
     } else {

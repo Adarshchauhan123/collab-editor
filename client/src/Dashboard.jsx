@@ -42,11 +42,14 @@ function Dashboard() {
 
   // Team Chat -- see the section near the bottom of the page. "team" mode
   // broadcasts to every accepted member of one chosen team; "people" mode
-  // lets the host hand-pick any subset (one person, or a group) from the
-  // combined member list across every team they own.
+  // lets the host hand-pick any subset (one person, a group, or anyone
+  // else at all by typing their username -- not limited to your own
+  // teams' members). Available even with zero teams -- only the "team"
+  // broadcast option needs one.
   const [composeMode, setComposeMode] = useState("team");
   const [composeTeamId, setComposeTeamId] = useState("");
   const [composeRecipients, setComposeRecipients] = useState([]);
+  const [composeIndividualInput, setComposeIndividualInput] = useState("");
   const [composeText, setComposeText] = useState("");
   const [sendingMessage, setSendingMessage] = useState(false);
   const [messageError, setMessageError] = useState("");
@@ -302,14 +305,31 @@ function Dashboard() {
     setComposeRecipients((prev) => (prev.includes(username) ? prev.filter((u) => u !== username) : [...prev, username]));
   }
 
+  // Not a real <form> submit -- this lives inside the outer Team Chat
+  // form (nested <form> elements aren't valid HTML), so it's wired to a
+  // plain button click / Enter keypress instead. Lets a host message
+  // literally anyone with an account, not just people already in one of
+  // their teams.
+  function addComposeIndividual() {
+    const name = composeIndividualInput.trim();
+    if (!name || composeRecipients.includes(name)) return;
+    setComposeRecipients((prev) => [...prev, name]);
+    setComposeIndividualInput("");
+  }
+
   async function sendTeamMessage(e) {
     e.preventDefault();
     if (!composeText.trim()) return;
+    // Only actually "team" mode if there's a team to broadcast to --
+    // otherwise the people-picker is what's rendered regardless of what
+    // this state variable still says (see effectiveComposeMode below),
+    // so sending needs to agree with what's on screen.
+    const mode = composeMode === "team" && data.myTeams.length > 0 ? "team" : "people";
     setMessageError("");
     setSendingMessage(true);
     try {
       const body =
-        composeMode === "team"
+        mode === "team"
           ? { recipientType: "team", teamId: composeTeamId, text: composeText.trim() }
           : { recipientType: "people", usernames: composeRecipients, text: composeText.trim() };
       const res = await authFetch("/api/messages", {
@@ -322,6 +342,7 @@ function Dashboard() {
       setComposeText("");
       setComposeRecipients([]);
       setComposeTeamId("");
+      setComposeIndividualInput("");
       await load();
     } catch (err) {
       setMessageError(err.message);
@@ -393,8 +414,16 @@ function Dashboard() {
   const avatarLetter = user.username?.[0]?.toUpperCase() || "U";
 
   // Every accepted member across every team this user hosts, deduplicated
-  // -- the pool "people" mode picks recipients from in Team Chat below.
+  // -- the quick-pick pool "people" mode offers in Team Chat below, on top
+  // of being able to type in literally anyone else's username too.
   const allMyMembers = data ? Array.from(new Set(data.myTeams.flatMap((t) => t.members))) : [];
+
+  // "team" broadcast mode only makes sense with at least one team -- if
+  // there isn't one, render the people-picker regardless of what the
+  // composeMode radio last said (e.g. its default value before any team
+  // ever existed). Keeps Team Chat usable from the very first login, not
+  // gated behind creating a team first.
+  const effectiveComposeMode = data && composeMode === "team" && data.myTeams.length > 0 ? "team" : "people";
 
   return (
     <div className="dashboard">
@@ -815,90 +844,127 @@ function Dashboard() {
               )}
             </div>
             <div className="dashboard-section-body">
-              {data.myTeams.length === 0 ? (
-                <p className="dashboard-empty">Create a team above to start messaging its members.</p>
-              ) : (
-                <form className="compose-message-form" onSubmit={sendTeamMessage}>
-                  <div className="compose-mode-toggle">
-                    <label className={`compose-mode-option ${composeMode === "team" ? "selected" : ""}`}>
+              <form className="compose-message-form" onSubmit={sendTeamMessage}>
+                <div className="compose-mode-toggle">
+                  {data.myTeams.length > 0 && (
+                    <label className={`compose-mode-option ${effectiveComposeMode === "team" ? "selected" : ""}`}>
                       <input
                         type="radio"
                         name="composeMode"
-                        checked={composeMode === "team"}
+                        checked={effectiveComposeMode === "team"}
                         onChange={() => setComposeMode("team")}
                       />
                       Broadcast to a whole team
                     </label>
-                    <label className={`compose-mode-option ${composeMode === "people" ? "selected" : ""}`}>
-                      <input
-                        type="radio"
-                        name="composeMode"
-                        checked={composeMode === "people"}
-                        onChange={() => setComposeMode("people")}
-                      />
-                      Pick individuals / a group
-                    </label>
+                  )}
+                  <label className={`compose-mode-option ${effectiveComposeMode === "people" ? "selected" : ""}`}>
+                    <input
+                      type="radio"
+                      name="composeMode"
+                      checked={effectiveComposeMode === "people"}
+                      onChange={() => setComposeMode("people")}
+                    />
+                    Pick individuals / a group / anyone else
+                  </label>
+                </div>
+
+                {effectiveComposeMode === "team" ? (
+                  <div className="invite-team-pills">
+                    {data.myTeams.map((t) => (
+                      <button
+                        type="button"
+                        key={t.id}
+                        className={`invite-team-pill ${composeTeamId === t.id ? "selected" : ""}`}
+                        onClick={() => setComposeTeamId((prev) => (prev === t.id ? "" : t.id))}
+                      >
+                        {composeTeamId === t.id && <span className="invite-pill-check">✓</span>}
+                        {t.name}
+                        <span className="invite-pill-count">{t.members.length}</span>
+                      </button>
+                    ))}
                   </div>
+                ) : (
+                  <>
+                    {allMyMembers.length > 0 && (
+                      <div className="invite-team-pills">
+                        {allMyMembers.map((username) => (
+                          <button
+                            type="button"
+                            key={username}
+                            className={`invite-team-pill ${composeRecipients.includes(username) ? "selected" : ""}`}
+                            onClick={() => toggleRecipient(username)}
+                          >
+                            {composeRecipients.includes(username) && <span className="invite-pill-check">✓</span>}
+                            {username}
+                          </button>
+                        ))}
+                      </div>
+                    )}
 
-                  {composeMode === "team" ? (
-                    <select
-                      className="compose-team-select"
-                      value={composeTeamId}
-                      onChange={(e) => setComposeTeamId(e.target.value)}
-                    >
-                      <option value="">Choose a team…</option>
-                      {data.myTeams.map((t) => (
-                        <option key={t.id} value={t.id}>
-                          {t.name} ({t.members.length} member{t.members.length === 1 ? "" : "s"})
-                        </option>
-                      ))}
-                    </select>
-                  ) : allMyMembers.length === 0 ? (
-                    <p className="dashboard-empty">None of your teams have any accepted members yet.</p>
-                  ) : (
-                    <div className="invite-team-pills">
-                      {allMyMembers.map((username) => (
-                        <button
-                          type="button"
-                          key={username}
-                          className={`invite-team-pill ${composeRecipients.includes(username) ? "selected" : ""}`}
-                          onClick={() => toggleRecipient(username)}
-                        >
-                          {composeRecipients.includes(username) && <span className="invite-pill-check">✓</span>}
-                          {username}
-                        </button>
-                      ))}
+                    <div className="invite-individual-form">
+                      <input
+                        value={composeIndividualInput}
+                        onChange={(e) => setComposeIndividualInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            addComposeIndividual();
+                          }
+                        }}
+                        placeholder="Message someone else by username"
+                      />
+                      <button type="button" onClick={addComposeIndividual} disabled={!composeIndividualInput.trim()}>
+                        + Add
+                      </button>
                     </div>
-                  )}
 
-                  <textarea
-                    className="compose-message-text"
-                    value={composeText}
-                    onChange={(e) => setComposeText(e.target.value)}
-                    placeholder="Write a message…"
-                    rows={3}
-                    maxLength={2000}
-                  />
+                    {composeRecipients.filter((u) => !allMyMembers.includes(u)).length > 0 && (
+                      <div className="invite-team-pills" style={{ marginTop: 8 }}>
+                        {composeRecipients
+                          .filter((u) => !allMyMembers.includes(u))
+                          .map((name) => (
+                            <button
+                              type="button"
+                              key={name}
+                              className="invite-team-pill selected"
+                              onClick={() => toggleRecipient(name)}
+                              title="Remove"
+                            >
+                              {name} ✕
+                            </button>
+                          ))}
+                      </div>
+                    )}
+                  </>
+                )}
 
-                  {messageError && (
-                    <div className="home-error" style={{ marginBottom: 10 }}>
-                      {messageError}
-                    </div>
-                  )}
+                <textarea
+                  className="compose-message-text"
+                  value={composeText}
+                  onChange={(e) => setComposeText(e.target.value)}
+                  placeholder="Write a message…"
+                  rows={3}
+                  maxLength={2000}
+                />
 
-                  <button
-                    type="submit"
-                    className="btn btn-primary compose-send-btn"
-                    disabled={
-                      sendingMessage ||
-                      !composeText.trim() ||
-                      (composeMode === "team" ? !composeTeamId : composeRecipients.length === 0)
-                    }
-                  >
-                    {sendingMessage ? "Sending…" : "Send"}
-                  </button>
-                </form>
-              )}
+                {messageError && (
+                  <div className="home-error" style={{ marginBottom: 10 }}>
+                    {messageError}
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  className="btn btn-primary compose-send-btn"
+                  disabled={
+                    sendingMessage ||
+                    !composeText.trim() ||
+                    (effectiveComposeMode === "team" ? !composeTeamId : composeRecipients.length === 0)
+                  }
+                >
+                  {sendingMessage ? "Sending…" : "Send"}
+                </button>
+              </form>
 
               <div className="message-feed">
                 {data.messages.length === 0 && <p className="dashboard-empty">No messages yet.</p>}

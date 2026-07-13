@@ -850,19 +850,6 @@
   margin: 0;
 }
 
-.compose-team-select {
-  width: 100%;
-  padding: 9px 12px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border-default);
-  background: var(--bg-glass);
-  color: var(--text-primary);
-  font-family: var(--font-sans);
-  font-size: 0.85rem;
-  outline: none;
-  cursor: pointer;
-}
-
 .compose-message-text {
   width: 100%;
   padding: 10px 12px;
