@@ -410,6 +410,23 @@ io.on("connection", (socket) => {
 
     roomPasscodes.set(roomId, expectedPasscode);
     if (!roomFiles.has(roomId)) {
+      // roomFiles can be missing here for two different reasons that used
+      // to get conflated: either this server process never saw this room
+      // before (handled above -- coldFiles is already set from that DB
+      // lookup), OR everyone left at some point and the room-empty cleanup
+      // (see leaveCurrentRoom) deleted this room's entry from roomFiles
+      // WITHOUT touching roomPasscodes -- so expectedPasscode was already
+      // known above and the `if` block above never ran, leaving coldFiles
+      // undefined even though there's very likely real, saved work in the
+      // database. Previously this fell straight through to DEFAULT_FILES
+      // (empty), silently discarding a room's files the moment the last
+      // person rejoined after everyone briefly left (e.g. navigating to
+      // the Dashboard and back). Checking the DB here too, whenever we
+      // don't already have coldFiles, closes that gap.
+      if (coldFiles === undefined) {
+        const persisted = await db.loadRoom(roomId);
+        coldFiles = persisted ? persisted.files : undefined;
+      }
       roomFiles.set(roomId, coldFiles ? { ...coldFiles } : { ...db.DEFAULT_FILES });
     }
 
