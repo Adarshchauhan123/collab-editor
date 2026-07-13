@@ -835,6 +835,40 @@ app.post("/api/teams/:teamId/members", auth.requireAuth, async (req, res) => {
   res.json({ ok: true });
 });
 
+// Host removes one person -- works whether they're an accepted member or
+// still a pending invite (e.g. a mistyped username the host wants to
+// retract rather than wait for a decline). See teams.js's removeMember.
+app.delete("/api/teams/:teamId/members/:username", auth.requireAuth, async (req, res) => {
+  try {
+    const team = await teams.removeMember(req.username, req.params.teamId, req.params.username);
+    res.json(team);
+  } catch (err) {
+    res.status(404).json({ error: err.message });
+  }
+});
+
+// Host deletes the whole team. No confirmation step server-side -- the
+// client asks before ever sending this.
+app.delete("/api/teams/:teamId", auth.requireAuth, async (req, res) => {
+  try {
+    await teams.deleteTeam(req.username, req.params.teamId);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(404).json({ error: err.message });
+  }
+});
+
+// Self-service: a MEMBER leaving a team they no longer want to be part
+// of, distinct from the host removing them.
+app.post("/api/teams/:teamId/leave", auth.requireAuth, async (req, res) => {
+  try {
+    await teams.leaveTeam(req.username, req.params.teamId);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(404).json({ error: err.message });
+  }
+});
+
 app.post("/api/teams/merge", auth.requireAuth, async (req, res) => {
   const { keepId, absorbId, name } = req.body || {};
   if (!keepId || !absorbId) return res.status(400).json({ error: "Both teams are required." });

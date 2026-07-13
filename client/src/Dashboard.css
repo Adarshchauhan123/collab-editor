@@ -525,6 +525,27 @@
   background: var(--bg-glass-hover);
 }
 
+.icon-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.icon-btn-danger:hover:not(:disabled) {
+  border-color: rgba(244,63,94,0.5);
+  color: var(--tint-rose);
+  background: rgba(244,63,94,0.1);
+}
+
+.icon-btn-wide {
+  width: auto;
+  padding: 0 12px;
+  gap: 4px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  font-family: var(--font-sans);
+  margin-top: 4px;
+}
+
 .team-rename-form {
   display: flex;
   gap: 6px;
@@ -583,11 +604,53 @@
   font-weight: 600;
 }
 
-.team-pending-line {
-  font-size: 0.78rem;
+.team-pending-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  font-weight: 600;
+  margin-right: 2px;
+}
+
+.team-member-chip-removable {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding-right: 4px;
+}
+
+.team-member-chip-pending {
+  background: transparent;
+  border-style: dashed;
   color: var(--text-muted);
   font-style: italic;
-  margin: 0;
+}
+
+.team-chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+
+.team-chip-remove:hover:not(:disabled) {
+  background: rgba(244,63,94,0.15);
+  color: var(--tint-rose);
+}
+
+.team-chip-remove:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .team-add-member-form {

@@ -64,6 +64,21 @@ function Dashboard() {
     }
   }
 
+  // Clicking "Join" used to navigate straight into the room WITHOUT ever
+  // telling the server this invite was accepted -- so it stayed "pending"
+  // forever and kept reappearing here every time the dashboard loaded,
+  // even after you'd already joined. Marking it accepted first (fire and
+  // forget -- don't make joining wait on this round trip) fixes that; the
+  // navigation happens immediately either way.
+  function joinInvite(inv) {
+    authFetch(`/api/invites/${inv.id}/respond`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ accept: true }),
+    }).catch(() => {});
+    navigate(`/room/${inv.roomId}?pwd=${inv.passcode}`);
+  }
+
   async function respondInvite(id, accept) {
     setBusyAction(id);
     try {
@@ -213,6 +228,59 @@ function Dashboard() {
     }
   }
 
+  // Host removing one person -- works for both an accepted member and a
+  // still-pending invite (e.g. a typo'd username), see teams.js.
+  async function removeMember(teamId, username) {
+    setBusyAction(`remove-${teamId}-${username}`);
+    setTeamActionError("");
+    try {
+      const res = await authFetch(`/api/teams/${teamId}/members/${encodeURIComponent(username)}`, { method: "DELETE" });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Could not remove that person.");
+      await load();
+    } catch (err) {
+      setTeamActionError(err.message);
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function deleteTeamAction(team) {
+    if (!window.confirm(`Delete "${team.name}" permanently? This removes the team and all its members. This can't be undone.`)) {
+      return;
+    }
+    setBusyAction(`delete-${team.id}`);
+    setTeamActionError("");
+    try {
+      const res = await authFetch(`/api/teams/${team.id}`, { method: "DELETE" });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Could not delete team.");
+      await load();
+    } catch (err) {
+      setTeamActionError(err.message);
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  // Self-service: a member leaving a team, distinct from the host
+  // removing them via removeMember above.
+  async function leaveTeamAction(team) {
+    if (!window.confirm(`Leave "${team.name}"? You'd need to be added again to rejoin.`)) return;
+    setBusyAction(`leave-${team.id}`);
+    setTeamActionError("");
+    try {
+      const res = await authFetch(`/api/teams/${team.id}/leave`, { method: "POST" });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Could not leave team.");
+      await load();
+    } catch (err) {
+      setTeamActionError(err.message);
+    } finally {
+      setBusyAction("");
+    }
+  }
+
   function openSession(session) {
     setViewingSession(session);
     const firstFile = Object.keys(session.files || {}).find((p) => !p.endsWith("/"));
@@ -321,7 +389,7 @@ function Dashboard() {
                   <div className="dashboard-card-actions">
                     <button
                       className="btn-accept"
-                      onClick={() => navigate(`/room/${inv.roomId}?pwd=${inv.passcode}`)}
+                      onClick={() => joinInvite(inv)}
                     >
                       Join
                     </button>
@@ -453,6 +521,14 @@ function Dashboard() {
                                   🔀
                                 </button>
                               )}
+                              <button
+                                className="icon-btn icon-btn-danger"
+                                title="Delete team"
+                                disabled={busyAction === `delete-${team.id}`}
+                                onClick={() => deleteTeamAction(team)}
+                              >
+                                🗑
+                              </button>
                             </div>
                           </>
                         )}
@@ -468,8 +544,17 @@ function Dashboard() {
                       {team.members.length > 0 ? (
                         <div className="team-member-chips">
                           {visibleMembers.map((m) => (
-                            <span className="team-member-chip" key={m}>
+                            <span className="team-member-chip team-member-chip-removable" key={m}>
                               {m}
+                              <button
+                                type="button"
+                                className="team-chip-remove"
+                                title={`Remove ${m} from this team`}
+                                disabled={busyAction === `remove-${team.id}-${m}`}
+                                onClick={() => removeMember(team.id, m)}
+                              >
+                                ✕
+                              </button>
                             </span>
                           ))}
                           {!expanded && team.members.length > 6 && (
@@ -487,7 +572,23 @@ function Dashboard() {
                       )}
 
                       {team.pending.length > 0 && (
-                        <p className="team-pending-line">Awaiting response: {team.pending.join(", ")}</p>
+                        <div className="team-member-chips">
+                          <span className="team-pending-label">Awaiting response:</span>
+                          {team.pending.map((m) => (
+                            <span className="team-member-chip team-member-chip-pending team-member-chip-removable" key={m}>
+                              {m}
+                              <button
+                                type="button"
+                                className="team-chip-remove"
+                                title={`Cancel invite for ${m}`}
+                                disabled={busyAction === `remove-${team.id}-${m}`}
+                                onClick={() => removeMember(team.id, m)}
+                              >
+                                ✕
+                              </button>
+                            </span>
+                          ))}
+                        </div>
                       )}
 
                       <form
@@ -564,6 +665,13 @@ function Dashboard() {
                           </span>
                         ))}
                       </div>
+                      <button
+                        className="icon-btn icon-btn-danger icon-btn-wide"
+                        disabled={busyAction === `leave-${team.id}`}
+                        onClick={() => leaveTeamAction(team)}
+                      >
+                        Leave team
+                      </button>
                     </div>
                   ))}
                 </div>

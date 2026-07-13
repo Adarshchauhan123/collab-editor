@@ -116,6 +116,36 @@ async function respondToTeamInvite(username, teamId, accept) {
   return serializeTeam(team);
 }
 
+// Removes one person from a team -- covers both "kick an accepted member"
+// and "cancel a pending invite I mistyped" with the same call, since a
+// username can only ever be in one of the two arrays at a time and $pull
+// against both is a no-op on whichever one it isn't in.
+async function removeMember(hostUsername, teamId, username) {
+  if (!db.isConnected()) throw new Error("Teams aren't available right now — MONGODB_URI isn't set.");
+  const team = await Team.findOneAndUpdate(
+    { _id: teamId, hostUsername },
+    { $pull: { members: username, pending: username } },
+    { new: true }
+  );
+  if (!team) throw new Error("Team not found.");
+  return serializeTeam(team);
+}
+
+// Self-service: a MEMBER removing themselves, as opposed to the host
+// removing them (removeMember above). Only pulls from `members` -- you
+// can't "leave" a team you're merely pending on, that's declining the
+// invite instead (respondToTeamInvite).
+async function leaveTeam(username, teamId) {
+  if (!db.isConnected()) throw new Error("Teams aren't available right now — MONGODB_URI isn't set.");
+  const team = await Team.findOneAndUpdate(
+    { _id: teamId, members: username },
+    { $pull: { members: username } },
+    { new: true }
+  );
+  if (!team) throw new Error("You're not a member of that team.");
+  return serializeTeam(team);
+}
+
 // Permanently combines two of a host's teams into one. `keepId` survives;
 // `absorbId` is deleted. All members and pending invites from both are
 // merged (deduplicated -- someone pending in one and already a member of
@@ -179,6 +209,8 @@ module.exports = {
   createTeam,
   renameTeam,
   deleteTeam,
+  removeMember,
+  leaveTeam,
   addPendingTeamMember,
   getTeamInvitesFor,
   respondToTeamInvite,
