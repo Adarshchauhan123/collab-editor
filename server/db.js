@@ -31,6 +31,12 @@
 const dns = require("dns");
 const mongoose = require("mongoose");
 
+// Required here (not just from index.js) so connectDB can reconcile every
+// model's indexes right after connecting -- see syncModelIndexes below.
+// models.js only requires "mongoose" itself, so this doesn't create a
+// circular dependency.
+const { User, Invite, Team, SavedSession, Message } = require("./models");
+
 // Force Node to resolve DNS via Google's public resolver instead of
 // whatever the OS has configured. This matters on some Windows setups
 // (VPN clients like Cloudflare WARP, certain antivirus/firewall products,
@@ -85,8 +91,34 @@ async function connectDB() {
     await mongoose.connect(MONGODB_URI);
     connected = true;
     console.log("Connected to MongoDB — rooms will persist across restarts.");
+    await syncModelIndexes();
   } catch (err) {
     console.warn("Could not connect to MongoDB, continuing without persistence:", err.message);
+  }
+}
+
+// Reconciles each model's ACTUAL indexes already sitting in Atlas with
+// what its CURRENT Mongoose schema defines -- drops anything stale and
+// creates anything missing. This exists because Mongoose never does this
+// automatically: when the Team schema changed from "one team per host"
+// (hostUsername: unique) to "many teams per host" (hostUsername: not
+// unique), the OLD unique index kept silently enforcing itself at the
+// database level in any already-existing Atlas cluster, causing
+// `E11000 duplicate key error ... hostUsername_1` the moment a host tried
+// to create a second team -- even though the schema said that should be
+// allowed. Running this once per server start makes that kind of schema
+// change self-healing from now on, instead of needing a one-off manual
+// "go delete this index in Atlas" step. Never fatal: a free-tier Atlas
+// user might lack the permissions this needs, in which case persistence
+// still works fine with whatever indexes already existed.
+async function syncModelIndexes() {
+  const models = [User, Invite, Team, SavedSession, Message];
+  for (const model of models) {
+    try {
+      await model.syncIndexes();
+    } catch (err) {
+      console.warn(`Could not sync indexes for ${model.modelName}:`, err.message);
+    }
   }
 }
 
