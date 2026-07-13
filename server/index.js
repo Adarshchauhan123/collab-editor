@@ -58,6 +58,7 @@ const auth = require("./auth");
 const invites = require("./invites");
 const teams = require("./teams");
 const sessions = require("./sessions");
+const messages = require("./messages");
 const { User } = require("./models");
 
 // In production this should be the exact URL of the deployed frontend
@@ -884,14 +885,15 @@ app.get("/api/auth/me", auth.requireAuth, (req, res) => {
 // separate round trips from the client for something that always renders
 // together.
 app.get("/api/dashboard", auth.requireAuth, async (req, res) => {
-  const [pendingInvites, savedSessions, myTeams, teamInvites, memberOfTeams] = await Promise.all([
+  const [pendingInvites, savedSessions, myTeams, teamInvites, memberOfTeams, teamMessages] = await Promise.all([
     invites.listPendingInvitesFor(req.username),
     sessions.listSavedSessionsFor(req.username),
     teams.listTeamsForHost(req.username),
     teams.getTeamInvitesFor(req.username),
     teams.listTeamsForMember(req.username),
+    messages.listMessagesFor(req.username),
   ]);
-  res.json({ pendingInvites, savedSessions, myTeams, teamInvites, memberOfTeams });
+  res.json({ pendingInvites, savedSessions, myTeams, teamInvites, memberOfTeams, messages: teamMessages });
 });
 
 // --- In-platform invites (Day 5+) ---
@@ -1016,6 +1018,68 @@ app.post("/api/teams/:teamId/respond", auth.requireAuth, async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     res.status(404).json({ error: err.message });
+  }
+});
+
+// --- Team Chat (persistent, Dashboard-level messaging) ---
+// A host broadcasts to a whole team, or hand-picks a group/individual from
+// that team's accepted members -- distinct from Room.jsx's in-room chat,
+// which is ephemeral and scoped to one meeting. Recipients are always
+// resolved server-side from the host's OWN teams (never trusted directly
+// from the client), same ownership-scoping principle as every other
+// mutating teams.js call: a host can only ever message people who are
+// actually in a team they own.
+app.post("/api/messages", auth.requireAuth, async (req, res) => {
+  const { recipientType, teamId, usernames, text } = req.body || {};
+  try {
+    const hostTeams = await teams.listTeamsForHost(req.username);
+    let toUsernames;
+    let teamName = null;
+
+    if (recipientType === "team") {
+      const team = hostTeams.find((t) => t.id === teamId);
+      if (!team) return res.status(404).json({ error: "Team not found." });
+      toUsernames = team.members;
+      teamName = team.name;
+    } else if (recipientType === "people") {
+      if (!Array.isArray(usernames) || usernames.length === 0) {
+        return res.status(400).json({ error: "Pick at least one person." });
+      }
+      // The chosen usernames must all actually be accepted members of SOME
+      // team this host owns -- keeps this a "message my own people" tool,
+      // not an open door to message any registered username.
+      const allMyMembers = new Set(hostTeams.flatMap((t) => t.members));
+      const invalid = usernames.filter((u) => !allMyMembers.has(u));
+      if (invalid.length > 0) {
+        return res.status(400).json({ error: `${invalid.join(", ")} ${invalid.length === 1 ? "isn't" : "aren't"} a member of any of your teams.` });
+      }
+      toUsernames = usernames;
+    } else {
+      return res.status(400).json({ error: "Choose a team or pick people to message." });
+    }
+
+    const message = await messages.sendMessage({ fromUsername: req.username, toUsernames, teamName, text });
+    res.json(message);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post("/api/messages/:id/like", auth.requireAuth, async (req, res) => {
+  try {
+    const message = await messages.toggleLike(req.params.id, req.username);
+    res.json(message);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post("/api/messages/:id/reply", auth.requireAuth, async (req, res) => {
+  try {
+    const message = await messages.addReply(req.params.id, req.username, (req.body || {}).text);
+    res.json(message);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
   }
 });
 

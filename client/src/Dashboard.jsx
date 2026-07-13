@@ -40,6 +40,19 @@ function Dashboard() {
   const [mergeCustomName, setMergeCustomName] = useState("");
   const [teamActionError, setTeamActionError] = useState("");
 
+  // Team Chat -- see the section near the bottom of the page. "team" mode
+  // broadcasts to every accepted member of one chosen team; "people" mode
+  // lets the host hand-pick any subset (one person, or a group) from the
+  // combined member list across every team they own.
+  const [composeMode, setComposeMode] = useState("team");
+  const [composeTeamId, setComposeTeamId] = useState("");
+  const [composeRecipients, setComposeRecipients] = useState([]);
+  const [composeText, setComposeText] = useState("");
+  const [sendingMessage, setSendingMessage] = useState(false);
+  const [messageError, setMessageError] = useState("");
+  const [replyDrafts, setReplyDrafts] = useState({}); // messageId -> draft text
+  const [replyOpenFor, setReplyOpenFor] = useState(null); // messageId currently showing its reply box
+
   useEffect(() => {
     if (!user) {
       navigate("/login");
@@ -281,6 +294,70 @@ function Dashboard() {
     }
   }
 
+  // Team Chat -- persistent, host-initiated messaging (see the section
+  // near the bottom of the page). toggleRecipient/sendTeamMessage handle
+  // composing; toggleMessageLike/sendReply are available to anyone
+  // involved in a message (sender or any recipient), not just the host.
+  function toggleRecipient(username) {
+    setComposeRecipients((prev) => (prev.includes(username) ? prev.filter((u) => u !== username) : [...prev, username]));
+  }
+
+  async function sendTeamMessage(e) {
+    e.preventDefault();
+    if (!composeText.trim()) return;
+    setMessageError("");
+    setSendingMessage(true);
+    try {
+      const body =
+        composeMode === "team"
+          ? { recipientType: "team", teamId: composeTeamId, text: composeText.trim() }
+          : { recipientType: "people", usernames: composeRecipients, text: composeText.trim() };
+      const res = await authFetch("/api/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Could not send message.");
+      setComposeText("");
+      setComposeRecipients([]);
+      setComposeTeamId("");
+      await load();
+    } catch (err) {
+      setMessageError(err.message);
+    } finally {
+      setSendingMessage(false);
+    }
+  }
+
+  async function toggleMessageLike(messageId) {
+    try {
+      const res = await authFetch(`/api/messages/${messageId}/like`, { method: "POST" });
+      if (!res.ok) return;
+      await load();
+    } catch {
+      // Non-critical -- a failed like toggle just leaves the heart as-is.
+    }
+  }
+
+  async function sendReply(messageId) {
+    const text = (replyDrafts[messageId] || "").trim();
+    if (!text) return;
+    try {
+      const res = await authFetch(`/api/messages/${messageId}/reply`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Could not send reply.");
+      setReplyDrafts((prev) => ({ ...prev, [messageId]: "" }));
+      await load();
+    } catch (err) {
+      setMessageError(err.message);
+    }
+  }
+
   function openSession(session) {
     setViewingSession(session);
     const firstFile = Object.keys(session.files || {}).find((p) => !p.endsWith("/"));
@@ -314,6 +391,10 @@ function Dashboard() {
 
   const viewingTree = viewingSession ? buildFileTree(viewingSession.files || {}) : null;
   const avatarLetter = user.username?.[0]?.toUpperCase() || "U";
+
+  // Every accepted member across every team this user hosts, deduplicated
+  // -- the pool "people" mode picks recipients from in Team Chat below.
+  const allMyMembers = data ? Array.from(new Set(data.myTeams.flatMap((t) => t.members))) : [];
 
   return (
     <div className="dashboard">
@@ -715,6 +796,168 @@ function Dashboard() {
                   </div>
                 </div>
               ))}
+            </div>
+          </section>
+
+          {/* Team Chat -- persistent, host-initiated messaging to a whole
+              team, a hand-picked group, or one person. Distinct from
+              Room.jsx's in-room chat: this lives here on the Dashboard,
+              outside any one meeting, and everyone involved (the sender
+              AND every recipient) can like or reply. */}
+          <section className="dashboard-section">
+            <div className="dashboard-section-header">
+              <h2>
+                <div className="dashboard-section-icon section-icon-rose">💬</div>
+                Team Chat
+              </h2>
+              {data.messages.length > 0 && (
+                <span className="badge badge-rose">{data.messages.length}</span>
+              )}
+            </div>
+            <div className="dashboard-section-body">
+              {data.myTeams.length === 0 ? (
+                <p className="dashboard-empty">Create a team above to start messaging its members.</p>
+              ) : (
+                <form className="compose-message-form" onSubmit={sendTeamMessage}>
+                  <div className="compose-mode-toggle">
+                    <label className={`compose-mode-option ${composeMode === "team" ? "selected" : ""}`}>
+                      <input
+                        type="radio"
+                        name="composeMode"
+                        checked={composeMode === "team"}
+                        onChange={() => setComposeMode("team")}
+                      />
+                      Broadcast to a whole team
+                    </label>
+                    <label className={`compose-mode-option ${composeMode === "people" ? "selected" : ""}`}>
+                      <input
+                        type="radio"
+                        name="composeMode"
+                        checked={composeMode === "people"}
+                        onChange={() => setComposeMode("people")}
+                      />
+                      Pick individuals / a group
+                    </label>
+                  </div>
+
+                  {composeMode === "team" ? (
+                    <select
+                      className="compose-team-select"
+                      value={composeTeamId}
+                      onChange={(e) => setComposeTeamId(e.target.value)}
+                    >
+                      <option value="">Choose a team…</option>
+                      {data.myTeams.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.name} ({t.members.length} member{t.members.length === 1 ? "" : "s"})
+                        </option>
+                      ))}
+                    </select>
+                  ) : allMyMembers.length === 0 ? (
+                    <p className="dashboard-empty">None of your teams have any accepted members yet.</p>
+                  ) : (
+                    <div className="invite-team-pills">
+                      {allMyMembers.map((username) => (
+                        <button
+                          type="button"
+                          key={username}
+                          className={`invite-team-pill ${composeRecipients.includes(username) ? "selected" : ""}`}
+                          onClick={() => toggleRecipient(username)}
+                        >
+                          {composeRecipients.includes(username) && <span className="invite-pill-check">✓</span>}
+                          {username}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  <textarea
+                    className="compose-message-text"
+                    value={composeText}
+                    onChange={(e) => setComposeText(e.target.value)}
+                    placeholder="Write a message…"
+                    rows={3}
+                    maxLength={2000}
+                  />
+
+                  {messageError && (
+                    <div className="home-error" style={{ marginBottom: 10 }}>
+                      {messageError}
+                    </div>
+                  )}
+
+                  <button
+                    type="submit"
+                    className="btn btn-primary compose-send-btn"
+                    disabled={
+                      sendingMessage ||
+                      !composeText.trim() ||
+                      (composeMode === "team" ? !composeTeamId : composeRecipients.length === 0)
+                    }
+                  >
+                    {sendingMessage ? "Sending…" : "Send"}
+                  </button>
+                </form>
+              )}
+
+              <div className="message-feed">
+                {data.messages.length === 0 && <p className="dashboard-empty">No messages yet.</p>}
+                {data.messages.map((m) => (
+                  <div className="message-card" key={m.id}>
+                    <div className="message-card-header">
+                      <strong>{m.fromUsername}</strong>
+                      <span className="message-recipients">
+                        → {m.teamName ? `team ${m.teamName}` : m.toUsernames.join(", ")}
+                      </span>
+                      <span className="message-time">{new Date(m.createdAt).toLocaleString()}</span>
+                    </div>
+                    <p className="message-text">{m.text}</p>
+                    <div className="message-card-actions">
+                      <button
+                        type="button"
+                        className={`message-like-btn ${m.likedBy.includes(user.username) ? "liked" : ""}`}
+                        onClick={() => toggleMessageLike(m.id)}
+                      >
+                        ♥ {m.likedBy.length > 0 ? m.likedBy.length : ""}
+                      </button>
+                      <button
+                        type="button"
+                        className="link-button"
+                        onClick={() => setReplyOpenFor(replyOpenFor === m.id ? null : m.id)}
+                      >
+                        Reply{m.replies.length > 0 ? ` (${m.replies.length})` : ""}
+                      </button>
+                    </div>
+
+                    {m.replies.length > 0 && (
+                      <div className="message-replies">
+                        {m.replies.map((r, i) => (
+                          <div className="message-reply" key={i}>
+                            <strong>{r.fromUsername}:</strong> {r.text}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {replyOpenFor === m.id && (
+                      <form
+                        className="message-reply-form"
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          sendReply(m.id);
+                        }}
+                      >
+                        <input
+                          value={replyDrafts[m.id] || ""}
+                          onChange={(e) => setReplyDrafts((prev) => ({ ...prev, [m.id]: e.target.value }))}
+                          placeholder="Write a reply…"
+                        />
+                        <button type="submit">Send</button>
+                      </form>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
           </section>
         </>

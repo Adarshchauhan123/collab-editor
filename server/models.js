@@ -61,9 +61,38 @@ const savedSessionSchema = new mongoose.Schema({
   sharedAt: { type: Date, default: Date.now },
 });
 
+// A host-initiated message to a whole team (broadcast), a hand-picked
+// group, or one person -- persistent and living on the Dashboard, NOT tied
+// to any one meeting (unlike Room.jsx's in-room chat, which is ephemeral,
+// in-memory only, and cleared the moment that room empties out).
+// `toUsernames` is always the fully-resolved flat list of recipients, even
+// for a team broadcast -- so a message and its thread stay intact and
+// visible to everyone who originally got it even if that team is later
+// renamed, has members removed, or is deleted outright. `teamName` is a
+// display-only snapshot ("sent to team Study Group") for the same reason.
+const messageSchema = new mongoose.Schema({
+  fromUsername: { type: String, required: true, index: true },
+  toUsernames: { type: [String], required: true, index: true },
+  teamName: { type: String, default: null },
+  text: { type: String, required: true, trim: true },
+  likedBy: { type: [String], default: [] },
+  replies: {
+    type: [
+      {
+        fromUsername: String,
+        text: String,
+        createdAt: { type: Date, default: Date.now },
+      },
+    ],
+    default: [],
+  },
+  createdAt: { type: Date, default: Date.now },
+});
+
 const User = mongoose.models.User || mongoose.model("User", userSchema);
 const Invite = mongoose.models.Invite || mongoose.model("Invite", inviteSchema);
 const Team = mongoose.models.Team || mongoose.model("Team", teamSchema);
 const SavedSession = mongoose.models.SavedSession || mongoose.model("SavedSession", savedSessionSchema);
+const Message = mongoose.models.Message || mongoose.model("Message", messageSchema);
 
-module.exports = { User, Invite, Team, SavedSession };
+module.exports = { User, Invite, Team, SavedSession, Message };
