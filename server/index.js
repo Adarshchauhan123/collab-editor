@@ -1003,15 +1003,14 @@ async function executeCode({ language, code, stdin }) {
 
     const data = await wRes.json();
 
-    // Wandbox only includes program_output/program_error/status/signal if
-    // the program actually ran. If compilation failed, none of those show
-    // up — only compiler_output/compiler_error do — so that absence is how
-    // we detect "compile error" vs "ran (maybe crashed)".
-    const ranProgram =
-      data.program_output !== undefined ||
-      data.program_error !== undefined ||
-      data.status !== undefined ||
-      data.signal !== undefined;
+    // Wandbox's own docs: `status` (exit code) and `signal` are the two
+    // fields that ONLY appear once the program actually started running —
+    // program_output/program_error are conditionally present too, but
+    // `status` is the one guaranteed to show up whenever execution
+    // happened, so it's the most reliable single check for "did this even
+    // get past compiling," rather than OR-ing across several fields that
+    // could theoretically be individually present/absent.
+    const ranProgram = data.status !== undefined || data.signal !== undefined;
 
     if (!ranProgram) {
       return {

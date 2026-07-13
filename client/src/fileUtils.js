@@ -42,7 +42,17 @@ const STARTER_TEMPLATES = {
   python: 'print("Hello, world!")\n',
   "c++": '#include <iostream>\n\nint main() {\n    std::cout << "Hello, world!" << std::endl;\n    return 0;\n}\n',
   c: '#include <stdio.h>\n\nint main() {\n    printf("Hello, world!\\n");\n    return 0;\n}\n',
-  java: 'public class Main {\n    public static void main(String[] args) {\n        System.out.println("Hello, world!");\n    }\n}\n',
+  // The class is named "prog", not "Main" -- Wandbox (the free compiler
+  // this app runs code through) always saves the submitted source as a
+  // fixed file called prog.java and runs it as `java prog`, regardless of
+  // filename in this editor. javac requires a PUBLIC class to match its
+  // file's name exactly, so "public class Main" fails to compile there
+  // with "class Main is public, should be declared in a file named
+  // Main.java" -- which showed up in the app as a confusing "no output"
+  // rather than a clear error (see index.js's executeCode for the other
+  // half of this fix). "prog" matches Wandbox's own official template, so
+  // it's guaranteed to work.
+  java: 'public class prog {\n    public static void main(String[] args) {\n        System.out.println("Hello, world!");\n    }\n}\n',
 };
 
 export function starterContentFor(path) {
