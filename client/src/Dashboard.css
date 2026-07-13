@@ -576,6 +576,13 @@
   color: var(--text-secondary);
 }
 
+.team-member-chip-you {
+  background: rgba(124,58,237,0.16);
+  border-color: var(--accent-primary);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
 .team-pending-line {
   font-size: 0.78rem;
   color: var(--text-muted);

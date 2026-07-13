@@ -532,6 +532,45 @@ function Dashboard() {
             </div>
           </section>
 
+          {/* Teams I'm In -- the other side of My Teams above. Accepting a
+              team invite made you a member, but until now there was no
+              place on YOUR dashboard that showed it -- only the host who
+              added you could see the team fill up. Read-only: managing a
+              team (rename, add members, merge) is the host's job, not a
+              member's. */}
+          {data.memberOfTeams.length > 0 && (
+            <section className="dashboard-section">
+              <div className="dashboard-section-header">
+                <h2>
+                  <div className="dashboard-section-icon section-icon-cyan">🤝</div>
+                  Teams I'm In
+                </h2>
+                <span className="badge badge-cyan">{data.memberOfTeams.length}</span>
+              </div>
+              <div className="dashboard-section-body">
+                <div className="team-grid">
+                  {data.memberOfTeams.map((team) => (
+                    <div className="team-card" key={team.id}>
+                      <div className="team-card-header">
+                        <span className="team-card-name">{team.name}</span>
+                      </div>
+                      <p style={{ color: "var(--text-secondary)", fontSize: "0.8rem", margin: 0 }}>
+                        Hosted by <strong style={{ color: "var(--text-primary)" }}>{team.hostUsername}</strong>
+                      </p>
+                      <div className="team-member-chips">
+                        {team.members.map((m) => (
+                          <span className={`team-member-chip ${m === user.username ? "team-member-chip-you" : ""}`} key={m}>
+                            {m === user.username ? "You" : m}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </section>
+          )}
+
           {/* Saved sessions */}
           <section className="dashboard-section">
             <div className="dashboard-section-header">

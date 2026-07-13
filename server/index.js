@@ -755,13 +755,14 @@ app.get("/api/auth/me", auth.requireAuth, (req, res) => {
 // separate round trips from the client for something that always renders
 // together.
 app.get("/api/dashboard", auth.requireAuth, async (req, res) => {
-  const [pendingInvites, savedSessions, myTeams, teamInvites] = await Promise.all([
+  const [pendingInvites, savedSessions, myTeams, teamInvites, memberOfTeams] = await Promise.all([
     invites.listPendingInvitesFor(req.username),
     sessions.listSavedSessionsFor(req.username),
     teams.listTeamsForHost(req.username),
     teams.getTeamInvitesFor(req.username),
+    teams.listTeamsForMember(req.username),
   ]);
-  res.json({ pendingInvites, savedSessions, myTeams, teamInvites });
+  res.json({ pendingInvites, savedSessions, myTeams, teamInvites, memberOfTeams });
 });
 
 // --- In-platform invites (Day 5+) ---

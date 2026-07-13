@@ -36,6 +36,21 @@ async function listTeamsForHost(hostUsername) {
   }
 }
 
+// Teams this user has ACCEPTED membership in -- the other side of
+// listTeamsForHost. Without this, a host sees their team fill up fine,
+// but the person who just accepted has no way to see it exists anywhere
+// on their own dashboard (only teams they host show up there otherwise).
+async function listTeamsForMember(username) {
+  if (!db.isConnected()) return [];
+  try {
+    const teams = await Team.find({ members: username }).sort({ createdAt: 1 }).lean();
+    return teams.map(serializeTeam);
+  } catch (err) {
+    console.warn(`Failed to list member teams for ${username}:`, err.message);
+    return [];
+  }
+}
+
 async function createTeam(hostUsername, name) {
   if (!db.isConnected()) throw new Error("Teams aren't available right now — MONGODB_URI isn't set.");
   const trimmed = (name || "").trim().slice(0, 60);
@@ -160,6 +175,7 @@ async function bulkInviteTeams({ hostUsername, teamIds, roomId, passcode }) {
 
 module.exports = {
   listTeamsForHost,
+  listTeamsForMember,
   createTeam,
   renameTeam,
   deleteTeam,

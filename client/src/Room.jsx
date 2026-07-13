@@ -191,6 +191,19 @@ function Room() {
   const editorViewRef = useRef(null);
   const cursorThrottleRef = useRef({ lastSent: 0, timer: null, pending: null });
 
+  // Set right before an INTENTIONAL leave (the Leave-meeting button, or
+  // logging out from inside a room) -- see the main effect's cleanup
+  // below. Navigating to the Dashboard also unmounts this component, but
+  // that's someone checking something and coming right back (see the
+  // "Return to meeting" banner there), not leaving -- it shouldn't emit
+  // "leave-room" and make their presence vanish for everyone else still
+  // here. The same socket connection stays open across that navigation
+  // (it's one persistent connection for the whole app, not per-page), so
+  // the server keeps treating them as present until they either actually
+  // leave or their connection genuinely drops (covered server-side by the
+  // "disconnect" handler as a fallback).
+  const intentionalLeaveRef = useRef(false);
+
   const isHost = hasJoined && joinUsername === host;
   const canEdit = isHost || editors.includes(joinUsername);
   const canUseAI = isHost || aiEnabledForAll;
@@ -337,7 +350,13 @@ function Room() {
     socket.on("room-meta", handleRoomMeta);
 
     return () => {
-      socket.emit("leave-room");
+      // Only tell the server we've left if this unmount is an actual,
+      // intentional leave -- see intentionalLeaveRef's declaration above
+      // for why navigating elsewhere in the app (e.g. to the Dashboard)
+      // does NOT set this flag and so does NOT emit leave-room.
+      if (intentionalLeaveRef.current) {
+        socket.emit("leave-room");
+      }
       socket.off("connect", joinRoom);
       socket.off("files-sync", handleFilesSync);
       socket.off("file-change", handleFileChange);
@@ -518,17 +537,16 @@ function Room() {
   }
 
   function leaveRoom() {
+    intentionalLeaveRef.current = true;
     navigate("/");
   }
 
   // Logging out from inside a room: clears the account session (same
   // logout() the Dashboard uses) and leaves the meeting the same way
-  // leaveRoom() does above -- navigating away unmounts Room.jsx, whose
-  // main effect's cleanup already emits "leave-room" on unmount, so
-  // there's nothing extra to do here beyond those two calls. Only shown
-  // to logged-in users (see the icon rail below) -- guests have no
-  // account to log out of.
+  // leaveRoom() does above. Only shown to logged-in users (see the icon
+  // rail below) -- guests have no account to log out of.
   function logoutFromRoom() {
+    intentionalLeaveRef.current = true;
     logout();
     navigate("/");
   }
