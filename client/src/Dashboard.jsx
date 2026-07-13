@@ -27,6 +27,19 @@ function Dashboard() {
   const [viewingFile, setViewingFile] = useState(null);
   const [busyAction, setBusyAction] = useState("");
 
+  // Multi-team management state -- see the "My Teams" section below.
+  const [newTeamName, setNewTeamName] = useState("");
+  const [creatingTeam, setCreatingTeam] = useState(false);
+  const [addMemberInputs, setAddMemberInputs] = useState({}); // teamId -> input value
+  const [expandedTeams, setExpandedTeams] = useState({}); // teamId -> bool
+  const [renamingId, setRenamingId] = useState(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [mergeSource, setMergeSource] = useState(null); // the team object the merge was opened from
+  const [mergeTargetId, setMergeTargetId] = useState("");
+  const [mergeNameChoice, setMergeNameChoice] = useState("source"); // "source" | "target" | "custom"
+  const [mergeCustomName, setMergeCustomName] = useState("");
+  const [teamActionError, setTeamActionError] = useState("");
+
   useEffect(() => {
     if (!user) {
       navigate("/login");
@@ -65,10 +78,10 @@ function Dashboard() {
     }
   }
 
-  async function respondTeam(hostUsername, accept) {
-    setBusyAction(hostUsername);
+  async function respondTeam(teamId, accept) {
+    setBusyAction(teamId);
     try {
-      await authFetch(`/api/teams/${hostUsername}/respond`, {
+      await authFetch(`/api/teams/${teamId}/respond`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ accept }),
@@ -79,10 +92,125 @@ function Dashboard() {
     }
   }
 
-  async function inviteTeamToNewMeeting() {
-    const res = await authFetch("/api/teams/invite-meeting", { method: "POST" });
-    const json = await res.json();
-    if (res.ok) navigate(`/room/${json.roomId}?pwd=${json.passcode}`);
+  // Kicks off a brand-new meeting with this one team pre-selected in the
+  // invite panel on the home page, instead of trying to replicate that
+  // whole flow again here — one place owns "create + invite," this just
+  // hands off to it.
+  function startMeetingWithTeam(team) {
+    navigate("/", { state: { preselectTeamId: team.id } });
+  }
+
+  async function createTeam(e) {
+    e.preventDefault();
+    if (!newTeamName.trim()) return;
+    setCreatingTeam(true);
+    setTeamActionError("");
+    try {
+      const res = await authFetch("/api/teams", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: newTeamName.trim() }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Could not create team.");
+      setNewTeamName("");
+      await load();
+    } catch (err) {
+      setTeamActionError(err.message);
+    } finally {
+      setCreatingTeam(false);
+    }
+  }
+
+  function startRename(team) {
+    setRenamingId(team.id);
+    setRenameValue(team.name);
+  }
+
+  async function saveRename(teamId) {
+    if (!renameValue.trim()) {
+      setRenamingId(null);
+      return;
+    }
+    setBusyAction(`rename-${teamId}`);
+    setTeamActionError("");
+    try {
+      const res = await authFetch(`/api/teams/${teamId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: renameValue.trim() }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Could not rename team.");
+      setRenamingId(null);
+      await load();
+    } catch (err) {
+      setTeamActionError(err.message);
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function addMember(teamId) {
+    const username = (addMemberInputs[teamId] || "").trim();
+    if (!username) return;
+    setBusyAction(`add-${teamId}`);
+    setTeamActionError("");
+    try {
+      const res = await authFetch(`/api/teams/${teamId}/members`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Could not add that person.");
+      setAddMemberInputs((prev) => ({ ...prev, [teamId]: "" }));
+      await load();
+    } catch (err) {
+      setTeamActionError(err.message);
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  function openMergeModal(team) {
+    setTeamActionError("");
+    setMergeSource(team);
+    setMergeTargetId("");
+    setMergeNameChoice("source");
+    setMergeCustomName("");
+  }
+
+  async function confirmMerge() {
+    if (!mergeSource || !mergeTargetId) return;
+    const targetTeam = data.myTeams.find((t) => t.id === mergeTargetId);
+    if (!targetTeam) return;
+    if (
+      !window.confirm(
+        `Merge "${targetTeam.name}" into "${mergeSource.name}"? Members and pending invites from both combine into one team, and this can't be undone.`
+      )
+    ) {
+      return;
+    }
+    const name =
+      mergeNameChoice === "custom" ? mergeCustomName.trim() : mergeNameChoice === "target" ? targetTeam.name : undefined;
+    setBusyAction("merge");
+    setTeamActionError("");
+    try {
+      const res = await authFetch("/api/teams/merge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ keepId: mergeSource.id, absorbId: mergeTargetId, name }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Could not merge teams.");
+      setMergeSource(null);
+      await load();
+    } catch (err) {
+      setTeamActionError(err.message);
+    } finally {
+      setBusyAction("");
+    }
   }
 
   function openSession(session) {
@@ -226,22 +354,23 @@ function Dashboard() {
                 <p className="dashboard-empty">No pending team invites.</p>
               )}
               {data.teamInvites.map((t) => (
-                <div className="dashboard-card" key={t.hostUsername}>
+                <div className="dashboard-card" key={t.teamId}>
                   <span className="dashboard-card-label">
-                    <strong>{t.hostUsername}</strong> wants to add you to their team
+                    <strong>{t.hostUsername}</strong> invited you to team{" "}
+                    <strong>{t.teamName}</strong>
                   </span>
                   <div className="dashboard-card-actions">
                     <button
                       className="btn-accept"
-                      disabled={busyAction === t.hostUsername}
-                      onClick={() => respondTeam(t.hostUsername, true)}
+                      disabled={busyAction === t.teamId}
+                      onClick={() => respondTeam(t.teamId, true)}
                     >
                       Accept
                     </button>
                     <button
                       className="btn-decline"
-                      disabled={busyAction === t.hostUsername}
-                      onClick={() => respondTeam(t.hostUsername, false)}
+                      disabled={busyAction === t.teamId}
+                      onClick={() => respondTeam(t.teamId, false)}
                     >
                       Decline
                     </button>
@@ -251,45 +380,155 @@ function Dashboard() {
             </div>
           </section>
 
-          {/* My team */}
+          {/* My Teams -- a host can own any number of named teams, each
+              grown by adding members directly (who still have to accept,
+              same consent rule as everything else in this app) or merged
+              together permanently when two should become one. */}
           <section className="dashboard-section">
             <div className="dashboard-section-header">
               <h2>
                 <div className="dashboard-section-icon section-icon-green">🏆</div>
-                My team
+                My Teams
               </h2>
-              {data.myTeam && (
-                <span className="badge badge-green">{data.myTeam.members.length} members</span>
+              {data.myTeams.length > 0 && (
+                <span className="badge badge-green">{data.myTeams.length}</span>
               )}
             </div>
             <div className="dashboard-section-body">
-              {data.myTeam ? (
-                <>
-                  <p style={{ color: "var(--text-secondary)", fontSize: "0.875rem" }}>
-                    {data.myTeam.members.length} member{data.myTeam.members.length === 1 ? "" : "s"}:{" "}
-                    <strong style={{ color: "var(--text-primary)" }}>
-                      {data.myTeam.members.join(", ") || "none yet"}
-                    </strong>
-                  </p>
-                  {data.myTeam.pending.length > 0 && (
-                    <p className="dashboard-empty" style={{ marginTop: 8 }}>
-                      Awaiting response: {data.myTeam.pending.join(", ")}
-                    </p>
-                  )}
-                  {data.myTeam.members.length > 0 && (
-                    <button
-                      className="dashboard-team-action"
-                      onClick={inviteTeamToNewMeeting}
-                    >
-                      ✦ Start a meeting &amp; invite whole team
-                    </button>
-                  )}
-                </>
-              ) : (
-                <p className="dashboard-empty">
-                  No team yet — enable "Team Mode" when creating a meeting to start building one.
-                </p>
+              {teamActionError && (
+                <div className="home-error" style={{ marginBottom: 14 }}>
+                  {teamActionError}
+                </div>
               )}
+
+              {data.myTeams.length === 0 && (
+                <p className="dashboard-empty">No teams yet — create one below to start building it up.</p>
+              )}
+
+              <div className="team-grid">
+                {data.myTeams.map((team) => {
+                  const expanded = !!expandedTeams[team.id];
+                  const visibleMembers = expanded ? team.members : team.members.slice(0, 6);
+                  return (
+                    <div className="team-card" key={team.id}>
+                      <div className="team-card-header">
+                        {renamingId === team.id ? (
+                          <form
+                            className="team-rename-form"
+                            onSubmit={(e) => {
+                              e.preventDefault();
+                              saveRename(team.id);
+                            }}
+                          >
+                            <input
+                              autoFocus
+                              value={renameValue}
+                              onChange={(e) => setRenameValue(e.target.value)}
+                              maxLength={60}
+                            />
+                            <button type="submit" title="Save" disabled={busyAction === `rename-${team.id}`}>
+                              ✓
+                            </button>
+                            <button type="button" title="Cancel" onClick={() => setRenamingId(null)}>
+                              ✕
+                            </button>
+                          </form>
+                        ) : (
+                          <>
+                            <span className="team-card-name">{team.name}</span>
+                            <div className="team-card-header-actions">
+                              <button
+                                className="icon-btn"
+                                title="Rename team"
+                                onClick={() => startRename(team)}
+                              >
+                                ✎
+                              </button>
+                              {data.myTeams.length > 1 && (
+                                <button
+                                  className="icon-btn"
+                                  title="Merge with another team"
+                                  onClick={() => openMergeModal(team)}
+                                >
+                                  🔀
+                                </button>
+                              )}
+                            </div>
+                          </>
+                        )}
+                      </div>
+
+                      <div className="team-card-counts">
+                        <span className="badge badge-green">{team.members.length} member{team.members.length === 1 ? "" : "s"}</span>
+                        {team.pending.length > 0 && (
+                          <span className="badge badge-cyan">{team.pending.length} pending</span>
+                        )}
+                      </div>
+
+                      {team.members.length > 0 ? (
+                        <div className="team-member-chips">
+                          {visibleMembers.map((m) => (
+                            <span className="team-member-chip" key={m}>
+                              {m}
+                            </span>
+                          ))}
+                          {!expanded && team.members.length > 6 && (
+                            <button
+                              className="link-button"
+                              style={{ fontSize: "0.75rem" }}
+                              onClick={() => setExpandedTeams((prev) => ({ ...prev, [team.id]: true }))}
+                            >
+                              +{team.members.length - 6} more
+                            </button>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="dashboard-empty" style={{ marginTop: 4 }}>No members yet.</p>
+                      )}
+
+                      {team.pending.length > 0 && (
+                        <p className="team-pending-line">Awaiting response: {team.pending.join(", ")}</p>
+                      )}
+
+                      <form
+                        className="team-add-member-form"
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          addMember(team.id);
+                        }}
+                      >
+                        <input
+                          value={addMemberInputs[team.id] || ""}
+                          onChange={(e) => setAddMemberInputs((prev) => ({ ...prev, [team.id]: e.target.value }))}
+                          placeholder="Add member by username"
+                        />
+                        <button type="submit" disabled={busyAction === `add-${team.id}`}>
+                          + Add
+                        </button>
+                      </form>
+
+                      {team.members.length > 0 && (
+                        <button className="dashboard-team-action" onClick={() => startMeetingWithTeam(team)}>
+                          ✦ Start a meeting with this team
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* New team */}
+              <form className="team-create-form" onSubmit={createTeam}>
+                <input
+                  value={newTeamName}
+                  onChange={(e) => setNewTeamName(e.target.value)}
+                  placeholder="New team name (e.g. Study Group)"
+                  maxLength={60}
+                />
+                <button type="submit" disabled={creatingTeam || !newTeamName.trim()}>
+                  {creatingTeam ? "Creating…" : "+ New Team"}
+                </button>
+              </form>
             </div>
           </section>
 
@@ -368,6 +607,97 @@ function Dashboard() {
                   ? (viewingSession.files || {})[viewingFile] || "(empty)"
                   : "Select a file to view it."}
               </pre>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Merge-teams modal */}
+      {mergeSource && (
+        <div className="modal-backdrop" onClick={() => setMergeSource(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ width: "min(440px, 92vw)" }}>
+            <div className="modal-header">
+              <span>Merge "{mergeSource.name}" with…</span>
+              <button className="link-button" onClick={() => setMergeSource(null)}>
+                ✕ Close
+              </button>
+            </div>
+            <div className="modal-body" style={{ flexDirection: "column", padding: 20, gap: 16 }}>
+              <div>
+                <label className="merge-field-label">Merge into</label>
+                <select
+                  className="merge-select"
+                  value={mergeTargetId}
+                  onChange={(e) => setMergeTargetId(e.target.value)}
+                >
+                  <option value="">Choose a team…</option>
+                  {data.myTeams
+                    .filter((t) => t.id !== mergeSource.id)
+                    .map((t) => (
+                      <option value={t.id} key={t.id}>
+                        {t.name} ({t.members.length} members)
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+              {mergeTargetId && (
+                <>
+                  <div>
+                    <label className="merge-field-label">Name for the combined team</label>
+                    <div className="merge-name-options">
+                      <label className="merge-name-option">
+                        <input
+                          type="radio"
+                          name="mergeName"
+                          checked={mergeNameChoice === "source"}
+                          onChange={() => setMergeNameChoice("source")}
+                        />
+                        Keep "{mergeSource.name}"
+                      </label>
+                      <label className="merge-name-option">
+                        <input
+                          type="radio"
+                          name="mergeName"
+                          checked={mergeNameChoice === "target"}
+                          onChange={() => setMergeNameChoice("target")}
+                        />
+                        Keep "{data.myTeams.find((t) => t.id === mergeTargetId)?.name}"
+                      </label>
+                      <label className="merge-name-option">
+                        <input
+                          type="radio"
+                          name="mergeName"
+                          checked={mergeNameChoice === "custom"}
+                          onChange={() => setMergeNameChoice("custom")}
+                        />
+                        New name:
+                        <input
+                          className="merge-custom-name-input"
+                          value={mergeCustomName}
+                          onChange={(e) => {
+                            setMergeCustomName(e.target.value);
+                            setMergeNameChoice("custom");
+                          }}
+                          placeholder="Combined team name"
+                          maxLength={60}
+                        />
+                      </label>
+                    </div>
+                  </div>
+
+                  <button
+                    className="dashboard-team-action"
+                    disabled={busyAction === "merge" || (mergeNameChoice === "custom" && !mergeCustomName.trim())}
+                    onClick={confirmMerge}
+                  >
+                    🔀 Merge permanently
+                  </button>
+                  <p className="dashboard-empty" style={{ margin: 0 }}>
+                    Members and pending invites from both teams combine into one. This can't be undone.
+                  </p>
+                </>
+              )}
             </div>
           </div>
         </div>

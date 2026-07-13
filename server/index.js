@@ -99,12 +99,6 @@ const roomUsers = new Map(); // roomId -> Map(socketId -> username)
 // when a room goes empty (unlike roomFiles/roomEditors/roomAIEnabled below).
 const roomPasscodes = new Map();
 
-// roomId -> hostUsername who enabled Team Mode when this meeting was
-// created (see POST /api/rooms). Only present for meetings created with
-// teamMode: true. Never cleared — a meeting keeps being "team-mode" for
-// its whole life so late joiners still get proposed to the team too.
-const roomTeamMode = new Map();
-
 function generateMeetingId() {
   // 9-digit numeric, Zoom-style. This is just an identifier, not a secret —
   // the passcode below is what actually protects the room, so this doesn't
@@ -137,22 +131,27 @@ function normalizePath(rawPath, { isFolder } = {}) {
 // unlikely chance of an in-memory collision) plus a passcode, persisted to
 // MongoDB if configured so the meeting is still valid after a restart.
 //
-// Team Mode (`{ teamMode: true }` in the body) needs a real account to own
-// the team being built, so that's the one case this endpoint requires a
-// login — creating a plain meeting (the default, and everything before
-// this feature existed) still needs nothing.
+// Inviting people is entirely optional and layered on top of that same
+// plain creation -- a guest (no account) can still create a meeting with
+// zero login and zero invites, exactly as before this feature existed.
+// `inviteTeamIds` (any of the caller's teams) and `inviteUsernames`
+// (individual registered users) both need a real account, since both are
+// just different ways of writing Invite records the caller owns.
 app.post("/api/rooms", async (req, res) => {
-  const { teamMode } = req.body || {};
+  const { inviteTeamIds, inviteUsernames } = req.body || {};
+  const wantsInvites =
+    (Array.isArray(inviteTeamIds) && inviteTeamIds.length > 0) ||
+    (Array.isArray(inviteUsernames) && inviteUsernames.length > 0);
 
   // Whoever is logged in when they create a meeting becomes its permanent
-  // "owner" -- see roomOwner below -- independent of Team Mode. A guest
-  // (no token) can still create a meeting exactly as before; it just has
-  // no fixed owner, and host status stays "whoever joins first," same as
-  // it always has for guest-created rooms.
+  // "owner" -- see roomOwner below. A guest (no token) can still create a
+  // meeting exactly as before; it just has no fixed owner, and host status
+  // stays "whoever joins first," same as it always has for guest-created
+  // rooms.
   const creatorUsername = auth.verifyToken(auth.extractBearerToken(req));
 
-  if (teamMode && !creatorUsername) {
-    return res.status(401).json({ error: "Log in to enable Team Mode for a meeting." });
+  if (wantsInvites && !creatorUsername) {
+    return res.status(401).json({ error: "Log in to invite teams or people to a meeting." });
   }
 
   let roomId;
@@ -165,9 +164,32 @@ app.post("/api/rooms", async (req, res) => {
   await db.createRoom(roomId, passcode);
 
   if (creatorUsername) roomOwner.set(roomId, creatorUsername);
-  if (teamMode) roomTeamMode.set(roomId, creatorUsername);
 
-  res.json({ roomId, passcode, teamMode: !!teamMode });
+  let invitedTeamCount = 0;
+  const individualResults = [];
+  if (creatorUsername && wantsInvites) {
+    if (Array.isArray(inviteTeamIds) && inviteTeamIds.length > 0) {
+      invitedTeamCount = await teams.bulkInviteTeams({
+        hostUsername: creatorUsername,
+        teamIds: inviteTeamIds,
+        roomId,
+        passcode,
+      });
+    }
+    if (Array.isArray(inviteUsernames)) {
+      for (const toUsername of inviteUsernames) {
+        if (typeof toUsername !== "string" || !toUsername.trim()) continue;
+        try {
+          await invites.createInvite({ fromUsername: creatorUsername, toUsername: toUsername.trim(), roomId, passcode });
+          individualResults.push({ username: toUsername.trim(), ok: true });
+        } catch (err) {
+          individualResults.push({ username: toUsername.trim(), ok: false, error: err.message });
+        }
+      }
+    }
+  }
+
+  res.json({ roomId, passcode, invitedTeamCount, individualResults });
 });
 
 // --- Host & permissions (Day 5+) ---
@@ -433,15 +455,6 @@ io.on("connection", (socket) => {
         if (!roomEditors.has(roomId)) roomEditors.set(roomId, new Set());
         roomEditors.get(roomId).add(previousHost);
       }
-    }
-
-    // Team Mode: if this meeting was created with Team Mode on and the
-    // joiner isn't the host themselves, silently record them as a pending
-    // team member — they'll see a "join so-and-so's team?" prompt on their
-    // own dashboard later, not as a popup interrupting a live session.
-    const teamHostUsername = roomTeamMode.get(roomId);
-    if (teamHostUsername && isAuthenticated && currentUsername !== teamHostUsername) {
-      teams.addPendingTeamMember(teamHostUsername, currentUsername).catch(() => {});
     }
 
     socket.emit("files-sync", roomFiles.get(roomId));
@@ -725,13 +738,13 @@ app.get("/api/auth/me", auth.requireAuth, (req, res) => {
 // separate round trips from the client for something that always renders
 // together.
 app.get("/api/dashboard", auth.requireAuth, async (req, res) => {
-  const [pendingInvites, savedSessions, myTeam, teamInvites] = await Promise.all([
+  const [pendingInvites, savedSessions, myTeams, teamInvites] = await Promise.all([
     invites.listPendingInvitesFor(req.username),
     sessions.listSavedSessionsFor(req.username),
-    teams.getTeamForHost(req.username),
+    teams.listTeamsForHost(req.username),
     teams.getTeamInvitesFor(req.username),
   ]);
-  res.json({ pendingInvites, savedSessions, myTeam, teamInvites });
+  res.json({ pendingInvites, savedSessions, myTeams, teamInvites });
 });
 
 // --- In-platform invites (Day 5+) ---
@@ -763,33 +776,66 @@ app.post("/api/invites/:id/respond", auth.requireAuth, async (req, res) => {
   }
 });
 
-// --- Teams (Day 5+) ---
-app.post("/api/teams/:hostUsername/respond", auth.requireAuth, async (req, res) => {
+// --- Teams (multi-team) ---
+// A host can own any number of named teams. Every mutating route below is
+// scoped to `req.username` as hostUsername (via each teams.js function's
+// own `{ _id: teamId, hostUsername }` query), so there's no way to rename,
+// add to, or merge a team you don't own even if you know its id.
+
+app.get("/api/teams", auth.requireAuth, async (req, res) => {
+  res.json({ teams: await teams.listTeamsForHost(req.username) });
+});
+
+app.post("/api/teams", auth.requireAuth, async (req, res) => {
+  try {
+    const team = await teams.createTeam(req.username, (req.body || {}).name);
+    res.json(team);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.patch("/api/teams/:teamId", auth.requireAuth, async (req, res) => {
+  try {
+    const team = await teams.renameTeam(req.username, req.params.teamId, (req.body || {}).name);
+    res.json(team);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Propose a member directly (host-initiated), instead of them arriving via
+// a meeting. Still just proposes -- they show up as "pending" until the
+// person accepts from their own dashboard, same consent rule as always.
+app.post("/api/teams/:teamId/members", auth.requireAuth, async (req, res) => {
+  const { username } = req.body || {};
+  if (!username || !username.trim()) return res.status(400).json({ error: "Username required." });
+  const added = await teams.addPendingTeamMember(req.username, req.params.teamId, username.trim());
+  if (!added) {
+    return res.status(400).json({ error: "Couldn't add that person (team not found, already a member, or already invited)." });
+  }
+  res.json({ ok: true });
+});
+
+app.post("/api/teams/merge", auth.requireAuth, async (req, res) => {
+  const { keepId, absorbId, name } = req.body || {};
+  if (!keepId || !absorbId) return res.status(400).json({ error: "Both teams are required." });
+  try {
+    const team = await teams.mergeTeams(req.username, keepId, absorbId, name);
+    res.json(team);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post("/api/teams/:teamId/respond", auth.requireAuth, async (req, res) => {
   const { accept } = req.body || {};
   try {
-    await teams.respondToTeamInvite(req.username, req.params.hostUsername, !!accept);
+    await teams.respondToTeamInvite(req.username, req.params.teamId, !!accept);
     res.json({ ok: true });
   } catch (err) {
     res.status(404).json({ error: err.message });
   }
-});
-
-// Creates a fresh meeting (Team-Mode enabled) and invites every accepted
-// member of the caller's team to it in one shot, reusing the same invite
-// records/dashboard flow as a single direct invite.
-app.post("/api/teams/invite-meeting", auth.requireAuth, async (req, res) => {
-  let roomId;
-  do {
-    roomId = generateMeetingId();
-  } while (roomPasscodes.has(roomId));
-
-  const passcode = generatePasscode();
-  roomPasscodes.set(roomId, passcode);
-  await db.createRoom(roomId, passcode);
-  roomTeamMode.set(roomId, req.username);
-
-  const invitedCount = await teams.bulkInviteTeam({ hostUsername: req.username, roomId, passcode });
-  res.json({ roomId, passcode, invitedCount });
 });
 
 // --- Saved sessions (Day 5+) ---
@@ -929,8 +975,13 @@ async function executeCode({ language, code, stdin }) {
     return { error: `Unsupported language: ${language}` };
   }
 
+  // 30s, not 20s: Java in particular (javac + a fresh JVM start on
+  // Wandbox's end) runs noticeably slower than the scripted languages, and
+  // a too-tight timeout here would silently show as "Program produced no
+  // output" instead of the actual "Execution timed out" message -- since a
+  // timeout returns a distinct { error } shape, not empty stdout/stderr.
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 20000);
+  const timeoutId = setTimeout(() => controller.abort(), 30000);
 
   try {
     const wRes = await fetch(WANDBOX_URL, {

@@ -25,13 +25,17 @@ const inviteSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now },
 });
 
-// Each host has at most one team (found by hostUsername), which grows over
-// time: `pending` is everyone who's joined one of the host's Team-Mode
-// meetings and hasn't responded yet; `members` is everyone who accepted.
-// One team per host (not many named teams) matches how this was described —
-// a single, growing group the host builds up, not a team-picker UI.
+// A host can now own MULTIPLE named teams (e.g. "Study Group", "Work
+// Project") -- hostUsername is indexed but no longer unique, since a host
+// creates as many of these as they want. `pending` is everyone who's been
+// added (via the "add member" flow) and hasn't responded yet; `members` is
+// everyone who accepted. Consent still applies the same way it always
+// did -- being added to a team is a proposal, not an instant membership,
+// whether that add came from joining a meeting (legacy) or a host
+// explicitly adding a username from the Dashboard's team management UI.
 const teamSchema = new mongoose.Schema({
-  hostUsername: { type: String, required: true, unique: true, index: true },
+  hostUsername: { type: String, required: true, index: true },
+  name: { type: String, required: true, trim: true, default: "My Team" },
   members: { type: [String], default: [] },
   pending: { type: [String], default: [] },
   createdAt: { type: Date, default: Date.now },

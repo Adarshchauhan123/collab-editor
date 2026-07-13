@@ -6,6 +6,7 @@ function Signup() {
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const { signup } = useAuth();
@@ -54,13 +55,24 @@ function Signup() {
             placeholder="Email address"
             type="email"
           />
-          <input
-            className="input"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="Password (min 8 characters)"
-            type="password"
-          />
+          <div className="password-field">
+            <input
+              className="input"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Password (min 8 characters)"
+              type={showPassword ? "text" : "password"}
+            />
+            <button
+              type="button"
+              className="password-toggle"
+              onClick={() => setShowPassword((v) => !v)}
+              tabIndex={-1}
+              title={showPassword ? "Hide password" : "Show password"}
+            >
+              {showPassword ? "🙈" : "👁"}
+            </button>
+          </div>
           <button className="btn btn-primary" type="submit" disabled={busy}>
             {busy ? "Creating account…" : "Sign up →"}
           </button>

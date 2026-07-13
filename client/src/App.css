@@ -158,6 +158,40 @@
   box-shadow: 0 0 0 3px rgba(124,58,237,0.15);
 }
 
+/* Password field wrapper -- lets the show/hide toggle sit inside the
+   input on the right edge instead of needing its own row. */
+.password-field {
+  position: relative;
+}
+
+.password-field input {
+  width: 100%;
+  padding-right: 44px;
+}
+
+.password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  width: 30px;
+  height: 30px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  transition: color var(--transition-fast);
+}
+
+.password-toggle:hover {
+  color: var(--text-primary);
+}
+
 .auth-form .btn-primary {
   width: 100%;
   padding: 13px;
@@ -216,35 +250,136 @@
   border-radius: var(--radius-full);
 }
 
-/* Team mode toggle */
-.team-mode-toggle {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 0.85rem;
-  color: var(--text-secondary);
-  cursor: pointer;
-  padding: 10px 16px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border-subtle);
-  background: var(--bg-glass);
-  transition: all var(--transition-fast);
-  width: 100%;
-  max-width: 400px;
+/* Invite panel -- optional teams/individuals picker under "New Meeting" */
+.invite-panel-toggle {
+  font-size: 0.82rem;
 }
 
-.team-mode-toggle:hover {
+.invite-panel {
+  width: 100%;
+  max-width: 420px;
+  margin-top: 4px;
+  padding: 16px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-glass);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  text-align: left;
+  animation: fadeIn 0.2s ease;
+}
+
+.invite-panel-section + .invite-panel-section {
+  padding-top: 14px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.invite-panel-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.invite-panel-empty {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.invite-team-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.invite-team-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-default);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-family: var(--font-sans);
+  transition: all var(--transition-fast);
+}
+
+.invite-team-pill:hover {
   border-color: var(--border-accent);
-  background: var(--bg-glass-hover);
   color: var(--text-primary);
 }
 
-.team-mode-toggle input[type="checkbox"] {
-  width: 16px;
-  height: 16px;
-  accent-color: var(--accent-primary);
+.invite-team-pill.selected {
+  background: rgba(124,58,237,0.16);
+  border-color: var(--accent-primary);
+  color: var(--text-primary);
+}
+
+.invite-pill-check {
+  color: var(--accent-primary);
+  font-weight: 700;
+}
+
+.invite-pill-count {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  background: var(--bg-glass);
+  border-radius: var(--radius-full);
+  padding: 1px 6px;
+}
+
+.invite-individual-form {
+  display: flex;
+  gap: 8px;
+}
+
+.invite-individual-form input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-default);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 0.82rem;
+  outline: none;
+  transition: all var(--transition-fast);
+}
+
+.invite-individual-form input:focus {
+  border-color: var(--accent-primary);
+}
+
+.invite-individual-form button {
+  padding: 8px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-default);
+  background: var(--bg-card);
+  color: var(--text-secondary);
   cursor: pointer;
-  flex-shrink: 0;
+  font-size: 0.8rem;
+  font-family: var(--font-sans);
+  font-weight: 600;
+  white-space: nowrap;
+  transition: all var(--transition-fast);
+}
+
+.invite-individual-form button:hover:not(:disabled) {
+  border-color: var(--accent-primary);
+  color: var(--text-primary);
+}
+
+.invite-individual-form button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* Join divider */
@@ -268,11 +403,13 @@
 /* Join form */
 .join-form {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
 .join-form input {
-  flex: 1;
+  flex: 1 1 90px;
+  min-width: 90px;
   padding: 11px 14px;
   background: var(--bg-glass);
   border: 1px solid var(--border-default);
@@ -290,7 +427,13 @@
   box-shadow: 0 0 0 3px rgba(124,58,237,0.15);
 }
 
+/* The submit button used to be able to get squeezed down to nothing (or
+   wrap off-screen) next to two flex:1 inputs in a narrow card -- it never
+   stopped existing in the markup, but on a cramped width, "there's no way
+   to submit" is exactly what it would look like. flex-basis: 100% forces
+   it onto its own row instead of fighting the inputs for space. */
 .join-form .btn-ghost {
+  flex: 1 1 100%;
   padding: 11px 20px;
   font-size: 0.875rem;
 }

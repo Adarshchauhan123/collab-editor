@@ -1,82 +1,149 @@
-// Team Mode: a host can grow a persistent group of collaborators over
-// time instead of re-sharing a meeting link one person at a time every
-// week. One team per host (found by hostUsername), not a team-picker UI —
-// matches the "everyone who joins gets added to one team" description this
-// was built from.
+// Team Mode: a host can build up any number of named, persistent groups
+// (e.g. "Study Group", "Interview Panel") instead of re-sharing a meeting
+// link one person at a time every time. This replaced an earlier "one team
+// per host" version -- see git history if you need the old single-team
+// shape.
 //
-// Joining a Team-Mode meeting only makes someone PENDING, never an
-// automatic member — see index.js's join-room handler. They accept or
-// decline from their own dashboard, on their own time, rather than being
-// interrupted with a popup mid-session.
+// Adding someone to a team only makes them PENDING, never an automatic
+// member -- they accept or decline from their own dashboard, on their own
+// time, rather than being silently grouped into something or interrupted
+// with a popup mid-session. That consent step applies no matter how they
+// got proposed: joining a meeting that named a team, or a host directly
+// typing their username into "add member."
 
 const db = require("./db");
 const { Team, Invite } = require("./models");
 
-// Called from index.js's join-room handler when someone (logged in, not
-// the host themselves) joins a Team-Mode meeting. Fire-and-forget from the
-// caller's perspective — never throws, so a DB hiccup here can't break the
-// actual live join.
-async function addPendingTeamMember(hostUsername, memberUsername) {
-  if (!db.isConnected() || memberUsername === hostUsername) return;
+function serializeTeam(team) {
+  return {
+    id: String(team._id),
+    hostUsername: team.hostUsername,
+    name: team.name,
+    members: team.members,
+    pending: team.pending,
+  };
+}
+
+// All teams a host owns/manages.
+async function listTeamsForHost(hostUsername) {
+  if (!db.isConnected()) return [];
   try {
-    const existing = await Team.findOne({ hostUsername }).lean();
-    if (existing && existing.members.includes(memberUsername)) return; // already a member, nothing to do
-    await Team.findOneAndUpdate(
-      { hostUsername },
-      { $setOnInsert: { hostUsername }, $addToSet: { pending: memberUsername } },
-      { upsert: true }
-    );
+    const teams = await Team.find({ hostUsername }).sort({ createdAt: 1 }).lean();
+    return teams.map(serializeTeam);
   } catch (err) {
-    console.warn(`Failed to add pending team member for ${hostUsername}:`, err.message);
+    console.warn(`Failed to list teams for ${hostUsername}:`, err.message);
+    return [];
   }
 }
 
-// The team a given user HOSTS (not teams they belong to — see
-// getTeamInvitesFor / a member's own dashboard doesn't need this).
-async function getTeamForHost(hostUsername) {
-  if (!db.isConnected()) return null;
+async function createTeam(hostUsername, name) {
+  if (!db.isConnected()) throw new Error("Teams aren't available right now — MONGODB_URI isn't set.");
+  const trimmed = (name || "").trim().slice(0, 60);
+  if (!trimmed) throw new Error("Team name can't be empty.");
+  const team = await Team.create({ hostUsername, name: trimmed, members: [], pending: [] });
+  return serializeTeam(team);
+}
+
+async function renameTeam(hostUsername, teamId, name) {
+  if (!db.isConnected()) throw new Error("Teams aren't available right now — MONGODB_URI isn't set.");
+  const trimmed = (name || "").trim().slice(0, 60);
+  if (!trimmed) throw new Error("Team name can't be empty.");
+  const team = await Team.findOneAndUpdate({ _id: teamId, hostUsername }, { name: trimmed }, { new: true });
+  if (!team) throw new Error("Team not found.");
+  return serializeTeam(team);
+}
+
+async function deleteTeam(hostUsername, teamId) {
+  if (!db.isConnected()) throw new Error("Teams aren't available right now — MONGODB_URI isn't set.");
+  const result = await Team.deleteOne({ _id: teamId, hostUsername });
+  if (result.deletedCount === 0) throw new Error("Team not found.");
+}
+
+// Propose a member for a specific team -- from the Dashboard's "add
+// member" box, or (legacy path) from join-room when a meeting names a
+// target team. Never throws on its own for the join-room fire-and-forget
+// case; callers that need a real error (the Dashboard's "add member"
+// button) should check the return value.
+async function addPendingTeamMember(hostUsername, teamId, memberUsername) {
+  if (!db.isConnected() || !memberUsername || memberUsername === hostUsername) return false;
   try {
-    const team = await Team.findOne({ hostUsername }).lean();
-    if (!team) return null;
-    return { hostUsername: team.hostUsername, members: team.members, pending: team.pending };
+    const team = await Team.findOne({ _id: teamId, hostUsername }).lean();
+    if (!team) return false;
+    if (team.members.includes(memberUsername) || team.pending.includes(memberUsername)) return false;
+    await Team.updateOne({ _id: teamId, hostUsername }, { $addToSet: { pending: memberUsername } });
+    return true;
   } catch (err) {
-    console.warn(`Failed to load team for ${hostUsername}:`, err.message);
-    return null;
+    console.warn(`Failed to add pending team member for ${hostUsername}/${teamId}:`, err.message);
+    return false;
   }
 }
 
-// Teams where this user is a PENDING member, awaiting their response.
+// Teams where this user is a PENDING member, awaiting their response —
+// across every host, not just one.
 async function getTeamInvitesFor(username) {
   if (!db.isConnected()) return [];
   try {
     const teams = await Team.find({ pending: username }).lean();
-    return teams.map((t) => ({ hostUsername: t.hostUsername }));
+    return teams.map((t) => ({ teamId: String(t._id), teamName: t.name, hostUsername: t.hostUsername }));
   } catch (err) {
     console.warn(`Failed to load team invites for ${username}:`, err.message);
     return [];
   }
 }
 
-async function respondToTeamInvite(username, hostUsername, accept) {
+async function respondToTeamInvite(username, teamId, accept) {
   if (!db.isConnected()) throw new Error("Teams aren't available right now — MONGODB_URI isn't set.");
   const update = accept
     ? { $pull: { pending: username }, $addToSet: { members: username } }
     : { $pull: { pending: username } };
-  const team = await Team.findOneAndUpdate({ hostUsername }, update, { new: true });
+  const team = await Team.findOneAndUpdate({ _id: teamId, pending: username }, update, { new: true });
   if (!team) throw new Error("Team invite not found.");
-  return team;
+  return serializeTeam(team);
 }
 
-// Invites every accepted member of the host's team to a freshly created
-// meeting, in one shot. Reuses the same Invite records / dashboard flow as
-// a regular one-person invite — a team invite is just several of those at
-// once, not a separate notification system.
-async function bulkInviteTeam({ hostUsername, roomId, passcode }) {
-  if (!db.isConnected()) return 0;
+// Permanently combines two of a host's teams into one. `keepId` survives;
+// `absorbId` is deleted. All members and pending invites from both are
+// merged (deduplicated -- someone pending in one and already a member of
+// the other ends up simply a member). `name`, if given, renames the
+// surviving team; otherwise it keeps whichever name `keepId` already had.
+async function mergeTeams(hostUsername, keepId, absorbId, name) {
+  if (!db.isConnected()) throw new Error("Teams aren't available right now — MONGODB_URI isn't set.");
+  if (keepId === absorbId) throw new Error("Can't merge a team with itself.");
+
+  const [keep, absorb] = await Promise.all([
+    Team.findOne({ _id: keepId, hostUsername }),
+    Team.findOne({ _id: absorbId, hostUsername }).lean(),
+  ]);
+  if (!keep || !absorb) throw new Error("Team not found.");
+
+  const mergedMembers = Array.from(new Set([...keep.members, ...absorb.members]));
+  // Anyone pending in either team, minus anyone who's already a confirmed
+  // member post-merge (being a member beats being pending).
+  const mergedPending = Array.from(new Set([...keep.pending, ...absorb.pending])).filter(
+    (u) => !mergedMembers.includes(u)
+  );
+
+  keep.members = mergedMembers;
+  keep.pending = mergedPending;
+  const trimmedName = (name || "").trim().slice(0, 60);
+  if (trimmedName) keep.name = trimmedName;
+  await keep.save();
+  await Team.deleteOne({ _id: absorbId, hostUsername });
+
+  return serializeTeam(keep);
+}
+
+// Invites every accepted member across the given teams to a freshly
+// created meeting, deduplicated (someone in two selected teams only gets
+// one invite). Reuses the same Invite records / dashboard flow as a
+// regular one-person invite.
+async function bulkInviteTeams({ hostUsername, teamIds, roomId, passcode }) {
+  if (!db.isConnected() || !Array.isArray(teamIds) || teamIds.length === 0) return 0;
   try {
-    const team = await Team.findOne({ hostUsername }).lean();
-    if (!team || team.members.length === 0) return 0;
-    const docs = team.members.map((toUsername) => ({
+    const teams = await Team.find({ _id: { $in: teamIds }, hostUsername }).lean();
+    const usernames = Array.from(new Set(teams.flatMap((t) => t.members)));
+    if (usernames.length === 0) return 0;
+    const docs = usernames.map((toUsername) => ({
       fromUsername: hostUsername,
       toUsername,
       roomId,
@@ -86,15 +153,19 @@ async function bulkInviteTeam({ hostUsername, roomId, passcode }) {
     await Invite.insertMany(docs);
     return docs.length;
   } catch (err) {
-    console.warn(`Failed to bulk-invite team for ${hostUsername}:`, err.message);
+    console.warn(`Failed to bulk-invite teams for ${hostUsername}:`, err.message);
     return 0;
   }
 }
 
 module.exports = {
+  listTeamsForHost,
+  createTeam,
+  renameTeam,
+  deleteTeam,
   addPendingTeamMember,
-  getTeamForHost,
   getTeamInvitesFor,
   respondToTeamInvite,
-  bulkInviteTeam,
+  mergeTeams,
+  bulkInviteTeams,
 };
