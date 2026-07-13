@@ -1,0 +1,533 @@
+/* ═══════════════════════════════════════════════════════════════════
+   DESIGN SYSTEM — Collab Code Editor
+   Premium dark glassmorphism theme with vibrant violet/cyan palette
+   ═══════════════════════════════════════════════════════════════════ */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+:root {
+  /* Core palette — true black base (dark mode default). See
+     [data-theme="light"] below for the light-mode override of every
+     token in this block — component CSS should NEVER hardcode a color
+     that needs to differ between themes; it should reference one of
+     these custom properties instead, so switching themes is just
+     switching which values these resolve to. */
+  --bg-base:       #000000;
+  --bg-surface:    #050505;
+  --bg-elevated:   #0a0a0a;
+  --bg-card:       rgba(10, 10, 10, 0.65);
+  --bg-glass:      rgba(255, 255, 255, 0.04);
+  --bg-glass-hover: rgba(255, 255, 255, 0.07);
+
+  /* Surface tokens — for UI chrome (icon buttons, inputs, elevated
+     panels like the output console/team panel) that need MORE contrast
+     against the base than --bg-glass gives, without hardcoding a literal
+     white-tinted rgba() that would look wrong once the base isn't black
+     anymore (light mode). Two tiers (resting/hover) plus matching
+     borders, and one opaque "surface-2" for fully opaque elevated panels. */
+  --surface-1:              rgba(255,255,255,0.06);
+  --surface-1-hover:        rgba(255,255,255,0.11);
+  --surface-2:              #121212;
+  --surface-border:         rgba(255,255,255,0.12);
+  --surface-border-strong:  rgba(255,255,255,0.17);
+
+  /* Tint-text tokens — pastel-300 shades used as TEXT sitting on a
+     matching low-opacity tinted background (error/warning banners,
+     badges, link hovers). These pastels have great contrast on a near-
+     black base but poor contrast on a near-white one — see the
+     [data-theme="light"] override, which swaps them for a darker shade
+     of the same hue instead of leaving them unreadable in light mode. */
+  --tint-rose:    #fda4af;
+  --tint-amber:   #fcd34d;
+  --tint-emerald: #6ee7b7;
+  --tint-cyan:    #67e8f9;
+  --tint-violet:  #c4b5fd;
+
+  /* Accent spectrum — stays constant across themes; these are brand
+     colors, not surface colors, and are already contrast-checked against
+     both a near-black and a near-white base. */
+  --accent-primary:   #7c3aed;   /* violet-600 */
+  --accent-secondary: #06b6d4;   /* cyan-500   */
+  --accent-glow:      #a855f7;   /* purple-500 */
+  --accent-green:     #10b981;   /* emerald-500 */
+  --accent-rose:      #f43f5e;   /* rose-500   */
+  --accent-amber:     #f59e0b;   /* amber-500  */
+
+  /* Gradients */
+  --gradient-brand: linear-gradient(135deg, #7c3aed 0%, #06b6d4 100%);
+  --gradient-glow:  linear-gradient(135deg, rgba(124,58,237,0.15) 0%, rgba(6,182,212,0.15) 100%);
+  --gradient-card:  linear-gradient(135deg, rgba(124,58,237,0.08) 0%, rgba(6,182,212,0.04) 100%);
+
+  /* Text */
+  --text-primary:   #f1f5f9;
+  --text-secondary: #94a3b8;
+  --text-muted:     #475569;
+  --text-accent:    #a78bfa;
+
+  /* Borders */
+  --border-subtle:  rgba(255,255,255,0.06);
+  --border-default: rgba(255,255,255,0.10);
+  --border-accent:  rgba(124,58,237,0.4);
+
+  /* Shadows */
+  --shadow-sm:  0 1px 3px rgba(0,0,0,0.5);
+  --shadow-md:  0 4px 16px rgba(0,0,0,0.4);
+  --shadow-lg:  0 8px 32px rgba(0,0,0,0.5);
+  --shadow-glow: 0 0 40px rgba(124,58,237,0.25);
+
+  /* Typography */
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, Consolas, monospace;
+
+  /* Radius */
+  --radius-sm:  6px;
+  --radius-md:  10px;
+  --radius-lg:  16px;
+  --radius-xl:  24px;
+  --radius-full: 9999px;
+
+  /* Transitions */
+  --transition-fast:   150ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-normal: 250ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-slow:   400ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ── Light theme ──────────────────────────────────────────────────────
+   Applied via a `data-theme="light"` attribute on <html>, set by
+   ThemeContext.jsx. Overrides every color token from :root above —
+   nothing else needs to change, since every component in this app reads
+   colors through these custom properties rather than hardcoding them
+   (see the comment on --surface-1 above for the one class of exception
+   this session fixed). Accent colors are intentionally NOT overridden
+   here — they're brand colors, already legible on both a near-black and
+   a near-white base. */
+[data-theme="light"] {
+  --bg-base:       #f8fafc;
+  --bg-surface:    #ffffff;
+  --bg-elevated:   #ffffff;
+  --bg-card:       rgba(255, 255, 255, 0.78);
+  --bg-glass:      rgba(15, 23, 42, 0.045);
+  --bg-glass-hover: rgba(15, 23, 42, 0.08);
+
+  --surface-1:              rgba(15, 23, 42, 0.05);
+  --surface-1-hover:        rgba(15, 23, 42, 0.09);
+  --surface-2:              #ffffff;
+  --surface-border:         rgba(15, 23, 42, 0.13);
+  --surface-border-strong:  rgba(15, 23, 42, 0.2);
+
+  --text-primary:   #0f172a;
+  --text-secondary: #475569;
+  --text-muted:     #94a3b8;
+  --text-accent:    #7c3aed;
+
+  --border-subtle:  rgba(15, 23, 42, 0.08);
+  --border-default: rgba(15, 23, 42, 0.14);
+  --border-accent:  rgba(124,58,237,0.35);
+
+  --tint-rose:    #e11d48;
+  --tint-amber:   #b45309;
+  --tint-emerald: #059669;
+  --tint-cyan:    #0e7490;
+  --tint-violet:  #7c3aed;
+
+  --shadow-sm:  0 1px 3px rgba(15,23,42,0.08);
+  --shadow-md:  0 4px 16px rgba(15,23,42,0.1);
+  --shadow-lg:  0 8px 32px rgba(15,23,42,0.14);
+  --shadow-glow: 0 0 40px rgba(124,58,237,0.18);
+}
+
+/* Smooth color transition when toggling themes, instead of an
+   instantaneous, jarring flip. Scoped to just color-related properties
+   (not `all`) so it doesn't accidentally slow down unrelated hover/click
+   animations elsewhere. */
+body, .room-shell, .icon-rail, .room-header, .file-tree, .team-panel,
+.output-panel, .ai-panel, .join-gate-card, .card, .dashboard-card,
+.dashboard-section, .dashboard-topbar {
+  transition: background-color var(--transition-normal), border-color var(--transition-normal), color var(--transition-normal);
+}
+
+/* ── Theme toggle (floating, present on every page — see App.jsx) ──── */
+.theme-toggle {
+  position: fixed;
+  bottom: 22px;
+  right: 22px;
+  z-index: 1000;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  border: 1px solid var(--border-default);
+  background: var(--bg-card);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  color: var(--text-primary);
+  font-size: 19px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: var(--shadow-md);
+  transition: all var(--transition-normal);
+}
+
+.theme-toggle:hover {
+  transform: translateY(-2px) scale(1.05);
+  box-shadow: var(--shadow-lg);
+  border-color: var(--border-accent);
+}
+
+.theme-toggle:active {
+  transform: translateY(0) scale(0.97);
+}
+
+@media (max-width: 720px) {
+  .theme-toggle {
+    bottom: 14px;
+    right: 14px;
+    width: 42px;
+    height: 42px;
+    font-size: 17px;
+  }
+}
+
+/* ── Reset & Base ─────────────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--bg-base);
+  color: var(--text-primary);
+  min-height: 100vh;
+  line-height: 1.6;
+  overflow-x: hidden;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--surface-border-strong); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+/* Ambient background orbs */
+body::before {
+  content: '';
+  position: fixed;
+  top: -20%;
+  left: -10%;
+  width: 60vw;
+  height: 60vw;
+  background: radial-gradient(circle, rgba(124,58,237,0.08) 0%, transparent 70%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+body::after {
+  content: '';
+  position: fixed;
+  bottom: -20%;
+  right: -10%;
+  width: 50vw;
+  height: 50vw;
+  background: radial-gradient(circle, rgba(6,182,212,0.06) 0%, transparent 70%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+#root {
+  position: relative;
+  z-index: 1;
+  min-height: 100vh;
+}
+
+/* ── Typography ───────────────────────────────────────────────────── */
+h1, h2, h3, h4 {
+  font-family: var(--font-sans);
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
+}
+
+h1 { font-size: clamp(2rem, 5vw, 3.5rem); line-height: 1.1; }
+h2 { font-size: 1.25rem; line-height: 1.3; }
+h3 { font-size: 1rem; }
+
+p { color: var(--text-secondary); }
+
+a {
+  color: var(--text-accent);
+  text-decoration: none;
+  transition: color var(--transition-fast);
+}
+a:hover { color: var(--tint-violet); }
+
+code {
+  font-family: var(--font-mono);
+  font-size: 0.875em;
+  background: rgba(124,58,237,0.15);
+  color: var(--tint-violet);
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid rgba(124,58,237,0.25);
+}
+
+/* ── Utility classes ──────────────────────────────────────────────── */
+.glass {
+  background: var(--bg-glass);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border-default);
+}
+
+.gradient-text {
+  background: var(--gradient-brand);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ── Buttons ──────────────────────────────────────────────────────── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border-radius: var(--radius-md);
+  border: none;
+  font-family: var(--font-sans);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-normal);
+  white-space: nowrap;
+  user-select: none;
+  position: relative;
+  overflow: hidden;
+}
+
+.btn::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(255,255,255,0);
+  transition: background var(--transition-fast);
+}
+
+.btn:hover::before { background: rgba(255,255,255,0.08); }
+.btn:active::before { background: rgba(255,255,255,0.04); }
+
+/* Primary */
+.btn-primary {
+  background: var(--gradient-brand);
+  color: #fff;
+  box-shadow: 0 4px 20px rgba(124,58,237,0.35);
+}
+.btn-primary:hover {
+  box-shadow: 0 6px 28px rgba(124,58,237,0.5);
+  transform: translateY(-1px);
+}
+.btn-primary:active { transform: translateY(0); }
+.btn-primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+/* Ghost */
+.btn-ghost {
+  background: var(--bg-glass);
+  color: var(--text-primary);
+  border: 1px solid var(--border-default);
+}
+.btn-ghost:hover {
+  background: var(--bg-glass-hover);
+  border-color: var(--border-accent);
+}
+
+/* Danger */
+.btn-danger {
+  background: rgba(244, 63, 94, 0.15);
+  color: var(--tint-rose);
+  border: 1px solid rgba(244, 63, 94, 0.25);
+}
+.btn-danger:hover {
+  background: rgba(244, 63, 94, 0.25);
+}
+
+/* Success */
+.btn-success {
+  background: linear-gradient(135deg, #059669, #10b981);
+  color: #fff;
+  box-shadow: 0 4px 16px rgba(16,185,129,0.3);
+}
+.btn-success:hover {
+  box-shadow: 0 6px 24px rgba(16,185,129,0.45);
+  transform: translateY(-1px);
+}
+.btn-success:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+/* Link-style */
+.btn-link {
+  background: none;
+  border: none;
+  color: var(--text-accent);
+  padding: 0;
+  font-size: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  transition: color var(--transition-fast);
+}
+.btn-link:hover { color: var(--tint-violet); }
+
+/* Icon button */
+.btn-icon {
+  padding: 7px 14px;
+  font-size: 0.8rem;
+}
+
+/* ── Inputs ───────────────────────────────────────────────────────── */
+.input {
+  width: 100%;
+  padding: 12px 16px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 0.9rem;
+  transition: all var(--transition-fast);
+  outline: none;
+}
+
+.input::placeholder { color: var(--text-muted); }
+
+.input:focus {
+  border-color: var(--accent-primary);
+  background: rgba(124,58,237,0.06);
+  box-shadow: 0 0 0 3px rgba(124,58,237,0.15);
+}
+
+/* ── Cards ────────────────────────────────────────────────────────── */
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  transition: border-color var(--transition-normal), box-shadow var(--transition-normal);
+}
+
+.card:hover {
+  border-color: var(--border-default);
+}
+
+/* ── Badge ────────────────────────────────────────────────────────── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: var(--radius-full);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.badge-violet {
+  background: rgba(124,58,237,0.2);
+  color: var(--tint-violet);
+  border: 1px solid rgba(124,58,237,0.3);
+}
+
+.badge-cyan {
+  background: rgba(6,182,212,0.15);
+  color: var(--tint-cyan);
+  border: 1px solid rgba(6,182,212,0.25);
+}
+
+.badge-green {
+  background: rgba(16,185,129,0.15);
+  color: var(--tint-emerald);
+  border: 1px solid rgba(16,185,129,0.25);
+}
+
+/* ── Animations ───────────────────────────────────────────────────── */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 20px rgba(124,58,237,0.3); }
+  50%       { box-shadow: 0 0 40px rgba(124,58,237,0.6); }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -200% center; }
+  100% { background-position:  200% center; }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.animate-fade-in-up { animation: fadeInUp 0.5s ease both; }
+.animate-fade-in    { animation: fadeIn 0.4s ease both; }
+
+/* ── Label ────────────────────────────────────────────────────────── */
+.section-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* ── Error message ────────────────────────────────────────────────── */
+.error-message {
+  background: rgba(244,63,94,0.12);
+  border: 1px solid rgba(244,63,94,0.25);
+  color: var(--tint-rose);
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+  font-size: 0.875rem;
+}
+
+/* ── Divider ──────────────────────────────────────────────────────── */
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+.divider::before,
+.divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border-subtle);
+}

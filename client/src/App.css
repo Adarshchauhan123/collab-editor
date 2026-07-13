@@ -1,0 +1,333 @@
+/* ── App.css — Auth pages, Home page, shared layout ───────────────── */
+
+/* ── Auth / Home wrapper ──────────────────────────────────────────── */
+.home {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 24px;
+  position: relative;
+}
+
+/* ── Account topbar ───────────────────────────────────────────────── */
+.home-account-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 6px;
+  padding: 14px 28px;
+  background: var(--bg-card);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 0.85rem;
+  z-index: 100;
+}
+
+.home-account-bar span {
+  color: var(--text-secondary);
+}
+
+.home-account-bar strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.home-account-bar a,
+.home-account-bar .btn-link {
+  padding: 5px 14px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-default);
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: var(--bg-glass);
+  transition: all var(--transition-fast);
+  text-decoration: none;
+}
+
+.home-account-bar a:hover,
+.home-account-bar .btn-link:hover {
+  border-color: var(--accent-primary);
+  color: var(--text-primary);
+  background: var(--bg-glass-hover);
+}
+
+/* ── Hero card ────────────────────────────────────────────────────── */
+.home-card {
+  width: 100%;
+  max-width: 480px;
+  padding: 40px 36px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-xl);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  box-shadow: var(--shadow-lg), var(--shadow-glow);
+  animation: fadeInUp 0.5s ease both;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Gradient top stripe */
+.home-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: var(--gradient-brand);
+}
+
+/* ── Logo / brand ─────────────────────────────────────────────────── */
+.home-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 28px;
+}
+
+.home-logo-icon {
+  width: 44px;
+  height: 44px;
+  background: var(--gradient-brand);
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  box-shadow: 0 4px 20px rgba(124,58,237,0.4);
+}
+
+.home-logo-text {
+  font-size: 1.3rem;
+  font-weight: 800;
+  background: var(--gradient-brand);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  letter-spacing: -0.03em;
+}
+
+/* ── Card heading ─────────────────────────────────────────────────── */
+.home-card h1 {
+  font-size: 1.6rem;
+  font-weight: 700;
+  margin-bottom: 8px;
+  text-align: center;
+}
+
+.home-card p {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  text-align: center;
+  line-height: 1.6;
+  margin-bottom: 28px;
+}
+
+/* ── Auth form ────────────────────────────────────────────────────── */
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.auth-form input { @extend .input; }
+.auth-form input {
+  width: 100%;
+  padding: 12px 16px;
+  background: var(--bg-glass);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 0.9rem;
+  transition: all var(--transition-fast);
+  outline: none;
+}
+.auth-form input::placeholder { color: var(--text-muted); }
+.auth-form input:focus {
+  border-color: var(--accent-primary);
+  background: rgba(124,58,237,0.06);
+  box-shadow: 0 0 0 3px rgba(124,58,237,0.15);
+}
+
+.auth-form .btn-primary {
+  width: 100%;
+  padding: 13px;
+  font-size: 0.95rem;
+  margin-top: 4px;
+}
+
+/* ── Auth switch ──────────────────────────────────────────────────── */
+.auth-switch {
+  text-align: center;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  margin-top: 16px;
+}
+
+.auth-switch a {
+  color: var(--text-accent);
+  font-weight: 500;
+}
+
+/* ── Home landing specific ────────────────────────────────────────── */
+.home-hero {
+  text-align: center;
+  margin-bottom: 36px;
+}
+
+.home-hero h1 {
+  font-size: clamp(2rem, 5vw, 2.8rem);
+  font-weight: 800;
+  margin-bottom: 12px;
+  background: linear-gradient(135deg, #f1f5f9 0%, #a78bfa 50%, #67e8f9 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.home-hero p {
+  font-size: 1rem;
+  color: var(--text-secondary);
+  max-width: 360px;
+  margin: 0 auto;
+}
+
+/* Primary action area */
+.home-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 28px;
+}
+
+.home-actions .btn-primary {
+  padding: 14px 40px;
+  font-size: 1rem;
+  border-radius: var(--radius-full);
+}
+
+/* Team mode toggle */
+.team-mode-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 10px 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-glass);
+  transition: all var(--transition-fast);
+  width: 100%;
+  max-width: 400px;
+}
+
+.team-mode-toggle:hover {
+  border-color: var(--border-accent);
+  background: var(--bg-glass-hover);
+  color: var(--text-primary);
+}
+
+.team-mode-toggle input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent-primary);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+/* Join divider */
+.join-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  margin-bottom: 16px;
+}
+
+.join-divider::before,
+.join-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border-subtle);
+}
+
+/* Join form */
+.join-form {
+  display: flex;
+  gap: 8px;
+}
+
+.join-form input {
+  flex: 1;
+  padding: 11px 14px;
+  background: var(--bg-glass);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+  outline: none;
+  transition: all var(--transition-fast);
+}
+
+.join-form input::placeholder { color: var(--text-muted); }
+.join-form input:focus {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px rgba(124,58,237,0.15);
+}
+
+.join-form .btn-ghost {
+  padding: 11px 20px;
+  font-size: 0.875rem;
+}
+
+/* Errors */
+.home-error {
+  background: rgba(244,63,94,0.12);
+  border: 1px solid rgba(244,63,94,0.25);
+  color: var(--tint-rose);
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+  font-size: 0.85rem;
+  margin-top: 12px;
+  width: 100%;
+  text-align: center;
+}
+
+/* ── Full-width home layout (when logged in) ──────────────────────── */
+.home-full {
+  max-width: 520px;
+  width: 100%;
+  margin: 0 auto;
+  padding-top: 80px; /* account for fixed topbar */
+}
+
+/* Link button */
+.link-button {
+  background: none;
+  border: none;
+  color: var(--text-accent);
+  cursor: pointer;
+  padding: 0;
+  font-size: inherit;
+  font-family: inherit;
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  transition: color var(--transition-fast);
+}
+.link-button:hover { color: var(--tint-violet); }
