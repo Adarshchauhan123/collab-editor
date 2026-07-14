@@ -182,18 +182,40 @@ async function mergeTeams(hostUsername, keepId, absorbId, name) {
 // created meeting, deduplicated (someone in two selected teams only gets
 // one invite). Reuses the same Invite records / dashboard flow as a
 // regular one-person invite.
+// Invites every member of the given teams to a meeting -- ACCEPTED
+// members get a normal, immediately-usable meeting invite. PENDING
+// members (added to the team but haven't accepted that invite yet) get
+// one too, but flagged with requiresTeamId/requiresTeamName so it shows
+// up locked on their Dashboard until they accept the team invite first
+// -- otherwise someone the host just added to a team would never hear
+// about a meeting tied to that team just because they hadn't gotten
+// around to accepting yet. Someone in more than one of the selected
+// teams only gets one invite, preferring an accepted membership (fully
+// usable right away) over a pending one if they have both.
 async function bulkInviteTeams({ hostUsername, teamIds, roomId, passcode }) {
   if (!db.isConnected() || !Array.isArray(teamIds) || teamIds.length === 0) return 0;
   try {
-    const teams = await Team.find({ _id: { $in: teamIds }, hostUsername }).lean();
-    const usernames = Array.from(new Set(teams.flatMap((t) => t.members)));
-    if (usernames.length === 0) return 0;
-    const docs = usernames.map((toUsername) => ({
+    const teamDocs = await Team.find({ _id: { $in: teamIds }, hostUsername }).lean();
+    const byUsername = new Map();
+    for (const t of teamDocs) {
+      for (const m of t.members) {
+        byUsername.set(m, { teamId: null, teamName: null }); // accepted -- no lock
+      }
+    }
+    for (const t of teamDocs) {
+      for (const p of t.pending) {
+        if (!byUsername.has(p)) byUsername.set(p, { teamId: String(t._id), teamName: t.name });
+      }
+    }
+    if (byUsername.size === 0) return 0;
+    const docs = Array.from(byUsername.entries()).map(([toUsername, info]) => ({
       fromUsername: hostUsername,
       toUsername,
       roomId,
       passcode,
       status: "pending",
+      requiresTeamId: info.teamId,
+      requiresTeamName: info.teamName,
     }));
     await Invite.insertMany(docs);
     return docs.length;

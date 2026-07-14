@@ -83,16 +83,31 @@ function Dashboard() {
   // Clicking "Join" used to navigate straight into the room WITHOUT ever
   // telling the server this invite was accepted -- so it stayed "pending"
   // forever and kept reappearing here every time the dashboard loaded,
-  // even after you'd already joined. Marking it accepted first (fire and
-  // forget -- don't make joining wait on this round trip) fixes that; the
-  // navigation happens immediately either way.
-  function joinInvite(inv) {
-    authFetch(`/api/invites/${inv.id}/respond`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ accept: true }),
-    }).catch(() => {});
-    navigate(`/room/${inv.roomId}?pwd=${inv.passcode}`);
+  // even after you'd already joined.
+  //
+  // Awaited, not fire-and-forget: a locked invite -- one tied to a team
+  // invite this person hasn't accepted yet, see teams.js's
+  // bulkInviteTeams -- gets REJECTED by the server even if this somehow
+  // gets called on one (the Join button below is disabled for those, but
+  // this is the real enforcement, not just a UI nicety). Only navigate
+  // into the room once the accept actually went through.
+  async function joinInvite(inv) {
+    if (inv.locked) return;
+    try {
+      const res = await authFetch(`/api/invites/${inv.id}/respond`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accept: true }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(json.error || "Could not join this meeting.");
+        return;
+      }
+      navigate(`/room/${inv.roomId}?pwd=${inv.passcode}`);
+    } catch {
+      setError("Could not reach the server.");
+    }
   }
 
   async function respondInvite(id, accept) {
@@ -495,10 +510,18 @@ function Dashboard() {
                   <span className="dashboard-card-label">
                     <strong>{inv.fromUsername}</strong> invited you to meeting{" "}
                     <code>{inv.roomId}</code>
+                    {inv.locked && (
+                      <span className="invite-locked-note">
+                        {" "}
+                        — accept your invite to team <strong>{inv.requiresTeamName}</strong> first to join
+                      </span>
+                    )}
                   </span>
                   <div className="dashboard-card-actions">
                     <button
                       className="btn-accept"
+                      disabled={inv.locked}
+                      title={inv.locked ? `Accept your "${inv.requiresTeamName}" team invite first` : undefined}
                       onClick={() => joinInvite(inv)}
                     >
                       Join

@@ -22,6 +22,15 @@ const inviteSchema = new mongoose.Schema({
   roomId: { type: String, required: true },
   passcode: { type: String, required: true },
   status: { type: String, enum: ["pending", "accepted", "declined"], default: "pending" },
+  // Set only when this meeting invite came from inviting a TEAM (see
+  // teams.js's bulkInviteTeams) and the recipient hadn't yet accepted
+  // that team's invite at the moment this meeting invite was created.
+  // This is just a snapshot from creation time -- whether the meeting
+  // invite is actually still locked is re-checked LIVE against current
+  // team membership every time it's read (see invites.js), so accepting
+  // the team invite later unlocks it with no extra writes needed here.
+  requiresTeamId: { type: String, default: null },
+  requiresTeamName: { type: String, default: null },
   createdAt: { type: Date, default: Date.now },
 });
 
