@@ -136,15 +136,19 @@ async function isAllowedInRoom(roomId, username) {
   }
 }
 
-// roomId -> teamId. Set when a host checks the optional "automatically
-// add everyone who joins to a team" box (see POST /api/rooms) -- works
-// independently of accessMode, so it can be combined with EITHER an open
-// OR a restricted meeting. Unlike roomAllowedUsers (a gate), this is a
-// roster-builder: it doesn't restrict who can join, it just means every
-// authenticated person who successfully joins gets PROPOSED for that
-// team (pending, shown on their own Dashboard under "Team invites" to
-// accept or decline -- see join-room). Same never-cleared lifetime as
-// roomPasscodes/roomAllowedUsers.
+// roomId -> { mode: "all", teamId } | { mode: "assigned", assignments: Map }
+// | undefined. Set when a host checks the optional "automatically add
+// everyone who joins to a team" box (see POST /api/rooms) -- mutually
+// exclusive with a "restricted" meeting client-side (the New Meeting form
+// only lets one of the two be active), so this only ever applies to open
+// meetings in practice. Unlike roomAllowedUsers (a gate), this is a
+// roster-builder: it doesn't restrict who can join. "all" mode (exactly
+// one team picked) proposes EVERY joiner for that team; "assigned" mode
+// (multiple teams picked) only proposes individually invited people who
+// were explicitly assigned to one of them, each for their own team -- see
+// join-room. Either way it's a proposal (pending, shown on the joiner's
+// own Dashboard under "Team invites" to accept or decline), never instant
+// membership. Same never-cleared lifetime as roomPasscodes/roomAllowedUsers.
 const roomAutoTeam = new Map();
 
 function generateMeetingId() {
@@ -186,15 +190,16 @@ function normalizePath(rawPath, { isFolder } = {}) {
 // (individual registered users) both need a real account, since both are
 // just different ways of writing Invite records the caller owns.
 app.post("/api/rooms", async (req, res) => {
-  const { inviteTeamIds, inviteUsernames, restrictToTeamIds, autoTeamId } = req.body || {};
+  const { inviteTeamIds, inviteUsernames, restrictToTeamIds, autoTeamIds, individualTeamAssignments } = req.body || {};
   const wantsInvites =
     (Array.isArray(inviteTeamIds) && inviteTeamIds.length > 0) ||
     (Array.isArray(inviteUsernames) && inviteUsernames.length > 0);
   const wantsRestriction = Array.isArray(restrictToTeamIds) && restrictToTeamIds.length > 0;
-  // Only an EXISTING team, picked from the host's own list -- teams are
+  // Only EXISTING teams, picked from the host's own list -- teams are
   // only ever created from the Dashboard now, not inline here (that
-  // "+ Create a new team" shortcut was removed as redundant).
-  const wantsAutoTeam = typeof autoTeamId === "string" && autoTeamId.trim().length > 0;
+  // "+ Create a new team" shortcut was removed as redundant). Can be more
+  // than one -- see the auto-team setup block below for what that changes.
+  const wantsAutoTeam = Array.isArray(autoTeamIds) && autoTeamIds.length > 0;
 
   // Whoever is logged in when they create a meeting becomes its permanent
   // "owner" -- see roomOwner below. A guest (no token) can still create a
@@ -258,18 +263,42 @@ app.post("/api/rooms", async (req, res) => {
     roomAllowedUsers.set(roomId, { hostUsername: creatorUsername, teamIds: validTeamIds, individualUsernames });
   }
 
-  let resolvedAutoTeamName = null;
+  let resolvedAutoTeamNames = [];
   let autoTeamError = null;
   if (creatorUsername && wantsAutoTeam) {
     try {
       // Resolved via listTeamsForHost so a host can only wire an auto-add
-      // meeting up to a team they actually own, same ownership scoping as
+      // meeting up to teams they actually own, same ownership scoping as
       // every other teams.js call (e.g. restrictToTeamIds above).
       const hostTeams = await teams.listTeamsForHost(creatorUsername);
-      const team = hostTeams.find((t) => t.id === autoTeamId.trim());
-      if (!team) throw new Error("That team wasn't found.");
-      roomAutoTeam.set(roomId, team.id);
-      resolvedAutoTeamName = team.name;
+      const validTeams = hostTeams.filter((t) => autoTeamIds.includes(t.id));
+      if (validTeams.length === 0) throw new Error("None of those teams were found.");
+      resolvedAutoTeamNames = validTeams.map((t) => t.name);
+
+      if (validTeams.length === 1) {
+        // Exactly one team selected -- the simple, original behavior:
+        // EVERYONE who joins gets proposed for it, no assignment needed.
+        roomAutoTeam.set(roomId, { mode: "all", teamId: validTeams[0].id });
+      } else {
+        // Multiple teams selected -- there's no single unambiguous team
+        // for a random link-joiner to land in, so only individually
+        // invited people who were explicitly assigned to one of these
+        // teams (via individualTeamAssignments) get auto-added, each to
+        // their own assigned team. Anyone else who just joins the open
+        // link isn't auto-added to anything. Validated against both the
+        // selected team ids AND the actual invited usernames, so a
+        // tampered request can't sneak someone into a team they weren't
+        // shown as an option for.
+        const validTeamIds = new Set(validTeams.map((t) => t.id));
+        const invitedSet = new Set(Array.isArray(inviteUsernames) ? inviteUsernames.map((u) => u.trim()) : []);
+        const assignments = new Map();
+        if (individualTeamAssignments && typeof individualTeamAssignments === "object") {
+          for (const [uname, teamId] of Object.entries(individualTeamAssignments)) {
+            if (invitedSet.has(uname) && validTeamIds.has(teamId)) assignments.set(uname, teamId);
+          }
+        }
+        roomAutoTeam.set(roomId, { mode: "assigned", assignments });
+      }
     } catch (err) {
       console.warn(`Failed to set up auto-team for ${creatorUsername}:`, err.message);
       // Surfaced to the host below -- previously this failed silently, so
@@ -287,7 +316,7 @@ app.post("/api/rooms", async (req, res) => {
     individualResults,
     autoTeamError,
     restricted: !!(creatorUsername && wantsRestriction),
-    autoTeamName: resolvedAutoTeamName,
+    autoTeamNames: resolvedAutoTeamNames,
   });
 });
 
@@ -564,17 +593,29 @@ io.on("connection", (socket) => {
       if (!roomParticipants.has(roomId)) roomParticipants.set(roomId, new Set());
       roomParticipants.get(roomId).add(currentUsername);
 
-      // Open meeting with "auto-add everyone who joins to a team" turned
-      // on at creation -- see POST /api/rooms. This proposes membership
-      // (pending, shows up under the joiner's "Team invites" with
-      // Accept/Decline) rather than adding them outright -- same consent
-      // rule as every other way someone ends up on a team in this app.
-      // Fire-and-forget: a slow or failed DB write here shouldn't hold up
-      // the join itself.
-      const autoTeamId = roomAutoTeam.get(roomId);
-      if (autoTeamId) {
-        const teamOwner = roomOwner.get(roomId);
-        if (teamOwner) teams.addPendingTeamMember(teamOwner, autoTeamId, currentUsername);
+      // "Auto-add everyone who joins to a team" turned on at creation --
+      // see POST /api/rooms. This proposes membership (pending, shows up
+      // under the joiner's "Team invites" with Accept/Decline) rather
+      // than adding them outright -- same consent rule as every other way
+      // someone ends up on a team in this app. Fire-and-forget: a slow or
+      // failed DB write here shouldn't hold up the join itself.
+      const autoTeam = roomAutoTeam.get(roomId);
+      const teamOwner = roomOwner.get(roomId);
+      if (autoTeam && teamOwner) {
+        if (autoTeam.mode === "all") {
+          // Exactly one team was selected -- everyone who joins gets
+          // proposed for it, no per-person assignment needed.
+          teams.addPendingTeamMember(teamOwner, autoTeam.teamId, currentUsername);
+        } else if (autoTeam.mode === "assigned") {
+          // Multiple teams were selected -- only individually invited
+          // people who were explicitly assigned to one of them (see the
+          // New Meeting form) get proposed, each for their own assigned
+          // team. A random link-joiner who wasn't specifically assigned
+          // isn't added to anything -- there's no single unambiguous team
+          // for them among several.
+          const assignedTeamId = autoTeam.assignments.get(currentUsername);
+          if (assignedTeamId) teams.addPendingTeamMember(teamOwner, assignedTeamId, currentUsername);
+        }
       }
     }
 

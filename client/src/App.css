@@ -425,6 +425,58 @@
   padding: 1px 6px;
 }
 
+/* Individually-invited people, each optionally with a per-person team
+   assignment when multiple auto-teams are selected -- see Home.jsx. */
+.individual-invite-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.individual-invite-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.individual-team-assign {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.individual-team-assign-label {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.mini-team-pill {
+  padding: 3px 10px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-default);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-family: var(--font-sans);
+  transition: all var(--transition-fast);
+}
+
+.mini-team-pill:hover {
+  border-color: var(--border-accent);
+  color: var(--text-primary);
+}
+
+.mini-team-pill.selected {
+  background: rgba(124,58,237,0.16);
+  border-color: var(--accent-primary);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
 .invite-individual-form {
   display: flex;
   gap: 8px;

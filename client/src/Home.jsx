@@ -51,15 +51,19 @@ function Home() {
   // worrying about the link getting passed around.
   const [accessMode, setAccessMode] = useState(draft?.accessMode || "open");
 
-  // Auto-add-to-team is independent of accessMode -- a host can run a
-  // restricted meeting AND still want joiners auto-rostered into a team,
-  // or an open meeting with the same. Only an EXISTING team can be
-  // targeted (picked from the Dashboard's team list); there's no inline
-  // "create a new team" shortcut here anymore -- teams are only ever
-  // created from the Dashboard, so there's exactly one place that does
-  // that instead of two slightly-different versions of the same form.
+  // Auto-add-to-team is mutually exclusive with "restricted" (see the
+  // radio/checkbox handlers below). Only EXISTING teams can be targeted
+  // (picked from the Dashboard's team list) -- there's no inline
+  // "create a new team" shortcut here; teams are only ever created from
+  // the Dashboard. Can select MORE THAN ONE team: with exactly one
+  // selected, everyone who joins gets proposed for it, same as before.
+  // With several selected, that's ambiguous for a random link-joiner, so
+  // only individually invited people get auto-added, each to whichever of
+  // the selected teams they're specifically assigned to below.
   const [autoTeamEnabled, setAutoTeamEnabled] = useState(draft?.autoTeamEnabled || false);
-  const [autoTeamId, setAutoTeamId] = useState(draft?.autoTeamId || "");
+  const [autoTeamIds, setAutoTeamIds] = useState(draft?.autoTeamIds || []);
+  // username -> teamId, only meaningful when autoTeamIds.length > 1.
+  const [individualTeamAssignments, setIndividualTeamAssignments] = useState(draft?.individualTeamAssignments || {});
 
   // If we got here via Dashboard's "Start a meeting with this team"
   // button, that team should already be picked and the panel already
@@ -88,7 +92,7 @@ function Home() {
   useEffect(() => {
     if (accessMode === "restricted" && autoTeamEnabled) {
       setAutoTeamEnabled(false);
-      setAutoTeamId("");
+      setAutoTeamIds([]);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -100,16 +104,52 @@ function Home() {
     try {
       sessionStorage.setItem(
         DRAFT_KEY,
-        JSON.stringify({ showInvitePanel, selectedTeamIds, individualUsernames, accessMode, autoTeamEnabled, autoTeamId })
+        JSON.stringify({
+          showInvitePanel,
+          selectedTeamIds,
+          individualUsernames,
+          accessMode,
+          autoTeamEnabled,
+          autoTeamIds,
+          individualTeamAssignments,
+        })
       );
     } catch {
       // Storage can fail (private browsing, quota) -- losing the draft
       // isn't worth crashing the page over.
     }
-  }, [showInvitePanel, selectedTeamIds, individualUsernames, accessMode, autoTeamEnabled, autoTeamId]);
+  }, [showInvitePanel, selectedTeamIds, individualUsernames, accessMode, autoTeamEnabled, autoTeamIds, individualTeamAssignments]);
 
   function toggleTeam(teamId) {
     setSelectedTeamIds((prev) => (prev.includes(teamId) ? prev.filter((id) => id !== teamId) : [...prev, teamId]));
+  }
+
+  function toggleAutoTeam(teamId) {
+    setAutoTeamIds((prev) => {
+      const next = prev.includes(teamId) ? prev.filter((id) => id !== teamId) : [...prev, teamId];
+      // Dropping a team out of the selection invalidates any per-person
+      // assignments that pointed at it -- otherwise a hidden assignment
+      // could silently linger for a team no longer even offered.
+      if (!next.includes(teamId)) {
+        setIndividualTeamAssignments((prevAssign) => {
+          const copy = { ...prevAssign };
+          Object.keys(copy).forEach((uname) => {
+            if (copy[uname] === teamId) delete copy[uname];
+          });
+          return copy;
+        });
+      }
+      return next;
+    });
+  }
+
+  function assignIndividualTeam(username, teamId) {
+    setIndividualTeamAssignments((prev) => {
+      const next = { ...prev };
+      if (next[username] === teamId) delete next[username]; // clicking the same one again clears it
+      else next[username] = teamId;
+      return next;
+    });
   }
 
   function addIndividual(e) {
@@ -122,6 +162,12 @@ function Home() {
 
   function removeIndividual(name) {
     setIndividualUsernames((prev) => prev.filter((n) => n !== name));
+    setIndividualTeamAssignments((prev) => {
+      if (!(name in prev)) return prev;
+      const next = { ...prev };
+      delete next[name];
+      return next;
+    });
   }
 
   // Once a meeting's actually been created with this setup, there's no
@@ -139,8 +185,18 @@ function Home() {
     setIndividualUsernames([]);
     setAccessMode("open");
     setAutoTeamEnabled(false);
-    setAutoTeamId("");
+    setAutoTeamIds([]);
+    setIndividualTeamAssignments({});
   }
+
+  // Teams with nobody actually in them yet are hidden from the
+  // invite/restrict picker below -- notifying, or gating a meeting on, a
+  // team with zero accepted members reaches nobody, so there's no point
+  // cluttering that list with it. This does NOT apply to the auto-team
+  // picker further up: that feature's whole point is building a team's
+  // roster up from zero as people join, so an empty team is exactly what
+  // you'd expect to pick there.
+  const teamsWithMembers = myTeams.filter((t) => t.members.length > 0);
 
   // Meetings are created server-side (POST /api/rooms), not generated in
   // the browser — the server is the one issuing the meeting ID + passcode.
@@ -152,8 +208,8 @@ function Home() {
       setError("Select at least one team to restrict this meeting to, or switch back to open.");
       return;
     }
-    if (autoTeamEnabled && !autoTeamId) {
-      setError("Choose a team for auto-add, or turn that option off.");
+    if (autoTeamEnabled && autoTeamIds.length === 0) {
+      setError("Choose at least one team for auto-add, or turn that option off.");
       return;
     }
 
@@ -162,7 +218,7 @@ function Home() {
     try {
       const hasInvites = user && (selectedTeamIds.length > 0 || individualUsernames.length > 0);
       const isRestricted = user && accessMode === "restricted";
-      const hasAutoTeam = user && autoTeamEnabled && autoTeamId;
+      const hasAutoTeam = user && autoTeamEnabled && autoTeamIds.length > 0;
       const res = hasInvites || isRestricted || hasAutoTeam
         ? await authFetch("/api/rooms", {
             method: "POST",
@@ -171,7 +227,8 @@ function Home() {
               inviteTeamIds: selectedTeamIds,
               inviteUsernames: individualUsernames,
               restrictToTeamIds: isRestricted ? selectedTeamIds : [],
-              autoTeamId: hasAutoTeam ? autoTeamId : "",
+              autoTeamIds: hasAutoTeam ? autoTeamIds : [],
+              individualTeamAssignments: hasAutoTeam && autoTeamIds.length > 1 ? individualTeamAssignments : {},
             }),
           })
         : await fetch(`${SERVER_URL}/api/rooms`, { method: "POST" });
@@ -275,7 +332,7 @@ function Home() {
                     // be active at a time -- selecting restricted turns
                     // auto-add off if it was on.
                     setAutoTeamEnabled(false);
-                    setAutoTeamId("");
+                    setAutoTeamIds([]);
                   }}
                 />
                 Only selected team(s) can join
@@ -310,20 +367,28 @@ function Home() {
                     No teams yet — <Link to="/dashboard">create one from your Dashboard</Link>.
                   </p>
                 ) : (
-                  <div className="invite-team-pills">
-                    {myTeams.map((team) => (
-                      <button
-                        type="button"
-                        key={team.id}
-                        className={`invite-team-pill ${autoTeamId === team.id ? "selected" : ""}`}
-                        onClick={() => setAutoTeamId((prev) => (prev === team.id ? "" : team.id))}
-                      >
-                        {autoTeamId === team.id && <span className="invite-pill-check">✓</span>}
-                        {team.name}
-                        <span className="invite-pill-count">{team.members.length}</span>
-                      </button>
-                    ))}
-                  </div>
+                  <>
+                    <div className="invite-team-pills">
+                      {myTeams.map((team) => (
+                        <button
+                          type="button"
+                          key={team.id}
+                          className={`invite-team-pill ${autoTeamIds.includes(team.id) ? "selected" : ""}`}
+                          onClick={() => toggleAutoTeam(team.id)}
+                        >
+                          {autoTeamIds.includes(team.id) && <span className="invite-pill-check">✓</span>}
+                          {team.name}
+                          <span className="invite-pill-count">{team.members.length}</span>
+                        </button>
+                      ))}
+                    </div>
+                    {autoTeamIds.length > 1 && (
+                      <p className="invite-panel-hint">
+                        Multiple teams selected — only people you invite individually below and assign to one of
+                        these teams will be auto-added. Anyone else who just joins the link won't be.
+                      </p>
+                    )}
+                  </>
                 )
               )}
             </div>
@@ -357,13 +422,17 @@ function Home() {
                     Accepting an invite to one of these teams later still gets someone in while the meeting's live.
                   </p>
                 )}
-                {myTeams.length === 0 ? (
+                {teamsWithMembers.length === 0 ? (
                   <p className="invite-panel-empty">
-                    No teams yet — <Link to="/dashboard">create one from your Dashboard</Link>.
+                    {myTeams.length === 0 ? (
+                      <>No teams yet — <Link to="/dashboard">create one from your Dashboard</Link>.</>
+                    ) : (
+                      "None of your teams have any accepted members yet — add some from your Dashboard first."
+                    )}
                   </p>
                 ) : (
                   <div className="invite-team-pills">
-                    {myTeams.map((team) => (
+                    {teamsWithMembers.map((team) => (
                       <button
                         type="button"
                         key={team.id}
@@ -392,17 +461,38 @@ function Home() {
                   </button>
                 </form>
                 {individualUsernames.length > 0 && (
-                  <div className="invite-team-pills" style={{ marginTop: 8 }}>
+                  <div className="individual-invite-list">
                     {individualUsernames.map((name) => (
-                      <button
-                        type="button"
-                        key={name}
-                        className="invite-team-pill selected"
-                        onClick={() => removeIndividual(name)}
-                        title="Remove"
-                      >
-                        {name} ✕
-                      </button>
+                      <div className="individual-invite-row" key={name}>
+                        <button
+                          type="button"
+                          className="invite-team-pill selected"
+                          onClick={() => removeIndividual(name)}
+                          title="Remove"
+                        >
+                          {name} ✕
+                        </button>
+                        {autoTeamEnabled && autoTeamIds.length > 1 && (
+                          <div className="individual-team-assign">
+                            <span className="individual-team-assign-label">→ team:</span>
+                            {autoTeamIds.map((teamId) => {
+                              const team = myTeams.find((t) => t.id === teamId);
+                              if (!team) return null;
+                              const assigned = individualTeamAssignments[name] === teamId;
+                              return (
+                                <button
+                                  type="button"
+                                  key={teamId}
+                                  className={`mini-team-pill ${assigned ? "selected" : ""}`}
+                                  onClick={() => assignIndividualTeam(name, teamId)}
+                                >
+                                  {team.name}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
                     ))}
                   </div>
                 )}
