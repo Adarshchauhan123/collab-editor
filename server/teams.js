@@ -51,25 +51,6 @@ async function listTeamsForMember(username) {
   }
 }
 
-function escapeRegex(str) {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-// Used by the "open meeting + team name" auto-roster flow on the New
-// Meeting form: a host names a team right there instead of picking one
-// that already exists. Reuses an existing team of that exact name (case-
-// insensitive) if the host already has one -- e.g. a recurring "Weekly
-// Standup" meeting shouldn't spawn a fresh duplicate team every time --
-// otherwise creates it fresh.
-async function findOrCreateTeamByName(hostUsername, name) {
-  if (!db.isConnected()) throw new Error("Teams aren't available right now — MONGODB_URI isn't set.");
-  const trimmed = (name || "").trim().slice(0, 60);
-  if (!trimmed) throw new Error("Team name can't be empty.");
-  let team = await Team.findOne({ hostUsername, name: new RegExp(`^${escapeRegex(trimmed)}$`, "i") });
-  if (!team) team = await Team.create({ hostUsername, name: trimmed, members: [], pending: [] });
-  return serializeTeam(team);
-}
-
 async function createTeam(hostUsername, name) {
   if (!db.isConnected()) throw new Error("Teams aren't available right now — MONGODB_URI isn't set.");
   const trimmed = (name || "").trim().slice(0, 60);
@@ -235,5 +216,4 @@ module.exports = {
   respondToTeamInvite,
   mergeTeams,
   bulkInviteTeams,
-  findOrCreateTeamByName,
 };

@@ -100,20 +100,46 @@ const roomUsers = new Map(); // roomId -> Map(socketId -> username)
 // when a room goes empty (unlike roomFiles/roomEditors/roomAIEnabled below).
 const roomPasscodes = new Map();
 
-// roomId -> Set(username) | undefined. Undefined (the default) means "open
-// meeting" -- anyone with the ID+passcode can join, exactly as this app has
-// always worked. When a host creates a meeting with accessMode "restricted",
-// this is set to the snapshot of who's allowed in (selected teams' accepted
-// members + individually invited usernames + the host themself), computed
-// ONCE at creation time -- not re-checked against live team membership, so
-// adding someone to a team later doesn't retroactively let them into a
-// meeting already running. Same lifetime rules as roomPasscodes: survives a
-// room going empty, never cleared by leaveCurrentRoom.
+// roomId -> { hostUsername, teamIds: string[], individualUsernames: Set }
+// | undefined. Undefined (the default) means "open meeting" -- anyone with
+// the ID+passcode can join, exactly as this app has always worked. When a
+// host creates a meeting with accessMode "restricted", this is set instead
+// of a flat resolved username list -- team membership is checked LIVE
+// against the database on every join attempt (see isAllowedInRoom below),
+// not a frozen snapshot from creation time. That's deliberate: if someone
+// accepts an invite to one of these teams AFTER this meeting was created,
+// they can still join while the meeting is still going, same as a real
+// Zoom-style meeting tied to a recurring team roster. `individualUsernames`
+// (people invited by name, not via a team) stays fixed at creation --
+// there's no "accept later" concept for those. Same lifetime rules as
+// roomPasscodes: survives a room going empty, never cleared by
+// leaveCurrentRoom.
 const roomAllowedUsers = new Map();
 
-// roomId -> teamId. Set when a host creates an OPEN meeting with the
-// optional "automatically add everyone who joins to a team" box checked
-// (see POST /api/rooms). Unlike roomAllowedUsers (a gate), this is a
+// Resolves whether `username` may join a gated room right now. Always
+// true for an open meeting (no gate set) and for the meeting's own host.
+// For a restricted meeting, checks the fixed individual-invite list first
+// (cheap), then re-queries the host's teams live for current membership
+// -- see roomAllowedUsers's comment for why this is live, not cached.
+async function isAllowedInRoom(roomId, username) {
+  const gate = roomAllowedUsers.get(roomId);
+  if (!gate) return true;
+  if (username === gate.hostUsername) return true;
+  if (gate.individualUsernames.has(username)) return true;
+  if (gate.teamIds.length === 0) return false;
+  try {
+    const hostTeams = await teams.listTeamsForHost(gate.hostUsername);
+    return hostTeams.some((t) => gate.teamIds.includes(t.id) && t.members.includes(username));
+  } catch (err) {
+    console.warn(`Failed to live-check room access for ${username} in ${roomId}:`, err.message);
+    return false;
+  }
+}
+
+// roomId -> teamId. Set when a host checks the optional "automatically
+// add everyone who joins to a team" box (see POST /api/rooms) -- works
+// independently of accessMode, so it can be combined with EITHER an open
+// OR a restricted meeting. Unlike roomAllowedUsers (a gate), this is a
 // roster-builder: it doesn't restrict who can join, it just means every
 // authenticated person who successfully joins gets PROPOSED for that
 // team (pending, shown on their own Dashboard under "Team invites" to
@@ -160,14 +186,15 @@ function normalizePath(rawPath, { isFolder } = {}) {
 // (individual registered users) both need a real account, since both are
 // just different ways of writing Invite records the caller owns.
 app.post("/api/rooms", async (req, res) => {
-  const { inviteTeamIds, inviteUsernames, restrictToTeamIds, autoTeamName, autoTeamId } = req.body || {};
+  const { inviteTeamIds, inviteUsernames, restrictToTeamIds, autoTeamId } = req.body || {};
   const wantsInvites =
     (Array.isArray(inviteTeamIds) && inviteTeamIds.length > 0) ||
     (Array.isArray(inviteUsernames) && inviteUsernames.length > 0);
   const wantsRestriction = Array.isArray(restrictToTeamIds) && restrictToTeamIds.length > 0;
-  const wantsAutoTeam =
-    (typeof autoTeamName === "string" && autoTeamName.trim().length > 0) ||
-    (typeof autoTeamId === "string" && autoTeamId.trim().length > 0);
+  // Only an EXISTING team, picked from the host's own list -- teams are
+  // only ever created from the Dashboard now, not inline here (that
+  // "+ Create a new team" shortcut was removed as redundant).
+  const wantsAutoTeam = typeof autoTeamId === "string" && autoTeamId.trim().length > 0;
 
   // Whoever is logged in when they create a meeting becomes its permanent
   // "owner" -- see roomOwner below. A guest (no token) can still create a
@@ -216,37 +243,31 @@ app.post("/api/rooms", async (req, res) => {
   }
 
   if (creatorUsername && wantsRestriction) {
-    // Snapshot who's allowed: accepted members of the chosen team(s), any
-    // individually invited usernames, and the host -- resolved via
-    // listTeamsForHost so a host can only restrict to teams they actually
-    // own, same ownership scoping as every other teams.js call.
+    // Ownership-check the chosen team ids up front, via listTeamsForHost,
+    // so a host can only ever restrict to teams they actually own -- but
+    // do NOT snapshot who's currently a member. That's re-checked LIVE at
+    // every join attempt instead (see isAllowedInRoom), so accepting one
+    // of these teams' invites after this meeting was created still gets
+    // you in while the meeting's still going.
     const hostTeams = await teams.listTeamsForHost(creatorUsername);
-    const chosenTeams = hostTeams.filter((t) => restrictToTeamIds.includes(t.id));
-    const allowed = new Set([creatorUsername]);
-    chosenTeams.forEach((t) => t.members.forEach((m) => allowed.add(m)));
+    const validTeamIds = hostTeams.filter((t) => restrictToTeamIds.includes(t.id)).map((t) => t.id);
+    const individualUsernames = new Set();
     if (Array.isArray(inviteUsernames)) {
-      inviteUsernames.forEach((u) => typeof u === "string" && u.trim() && allowed.add(u.trim()));
+      inviteUsernames.forEach((u) => typeof u === "string" && u.trim() && individualUsernames.add(u.trim()));
     }
-    roomAllowedUsers.set(roomId, allowed);
+    roomAllowedUsers.set(roomId, { hostUsername: creatorUsername, teamIds: validTeamIds, individualUsernames });
   }
 
   let resolvedAutoTeamName = null;
   let autoTeamError = null;
   if (creatorUsername && wantsAutoTeam) {
     try {
-      let team;
-      if (typeof autoTeamId === "string" && autoTeamId.trim()) {
-        // Picked one of the host's existing teams instead of typing a new
-        // name -- resolved via listTeamsForHost so a host can only wire an
-        // auto-add meeting up to a team they actually own, same ownership
-        // scoping as every other teams.js call (e.g. restrictToTeamIds
-        // above).
-        const hostTeams = await teams.listTeamsForHost(creatorUsername);
-        team = hostTeams.find((t) => t.id === autoTeamId.trim());
-        if (!team) throw new Error("That team wasn't found.");
-      } else {
-        team = await teams.findOrCreateTeamByName(creatorUsername, autoTeamName);
-      }
+      // Resolved via listTeamsForHost so a host can only wire an auto-add
+      // meeting up to a team they actually own, same ownership scoping as
+      // every other teams.js call (e.g. restrictToTeamIds above).
+      const hostTeams = await teams.listTeamsForHost(creatorUsername);
+      const team = hostTeams.find((t) => t.id === autoTeamId.trim());
+      if (!team) throw new Error("That team wasn't found.");
       roomAutoTeam.set(roomId, team.id);
       resolvedAutoTeamName = team.name;
     } catch (err) {
@@ -492,10 +513,12 @@ io.on("connection", (socket) => {
     const isAuthenticated = !!verifiedUsername;
     const candidateUsername = verifiedUsername || (username || "Anonymous").trim() || "Anonymous";
 
-    const allowedUsers = roomAllowedUsers.get(roomId);
-    if (allowedUsers && (!isAuthenticated || !allowedUsers.has(candidateUsername))) {
-      socket.emit("join-error", "This meeting is restricted — ask the host to invite you.");
-      return;
+    if (roomAllowedUsers.has(roomId)) {
+      const ok = isAuthenticated && (await isAllowedInRoom(roomId, candidateUsername));
+      if (!ok) {
+        socket.emit("join-error", "This meeting is restricted — ask the host to invite you.");
+        return;
+      }
     }
 
     // Validated — now it's safe to leave whatever room we were in before.

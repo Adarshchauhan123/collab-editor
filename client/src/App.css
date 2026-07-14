@@ -331,22 +331,6 @@
   margin: 0;
 }
 
-.auto-team-name-input {
-  width: 100%;
-  padding: 8px 12px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border-default);
-  background: var(--bg-card);
-  color: var(--text-primary);
-  font-size: 0.85rem;
-  font-family: var(--font-sans);
-}
-
-.auto-team-name-input:focus {
-  outline: none;
-  border-color: var(--accent-primary);
-}
-
 /* Invite panel -- optional teams/individuals picker under "New Meeting" */
 .invite-panel-toggle {
   font-size: 0.82rem;
