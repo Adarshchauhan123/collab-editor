@@ -331,6 +331,15 @@
   margin: 0;
 }
 
+.auto-team-checkbox-disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.auto-team-checkbox-disabled input[type="checkbox"] {
+  cursor: not-allowed;
+}
+
 /* Invite panel -- optional teams/individuals picker under "New Meeting" */
 .invite-panel-toggle {
   font-size: 0.82rem;

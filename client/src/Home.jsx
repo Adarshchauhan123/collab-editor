@@ -81,6 +81,18 @@ function Home() {
     }
   }, [preselectTeamId]);
 
+  // Restricted and auto-add-to-team are mutually exclusive (see the radio
+  // and checkbox handlers below) -- this just guards against a stale
+  // sessionStorage draft saved before that rule existed ever restoring
+  // both at once.
+  useEffect(() => {
+    if (accessMode === "restricted" && autoTeamEnabled) {
+      setAutoTeamEnabled(false);
+      setAutoTeamId("");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Keeps the draft in sessionStorage in sync with every change, so
   // leaving this page (e.g. to the Dashboard) and coming back restores
   // exactly where things were left off.
@@ -259,6 +271,11 @@ function Home() {
                   onChange={() => {
                     setAccessMode("restricted");
                     setShowInvitePanel(true);
+                    // Only one of "restricted" and "auto-add to team" can
+                    // be active at a time -- selecting restricted turns
+                    // auto-add off if it was on.
+                    setAutoTeamEnabled(false);
+                    setAutoTeamId("");
                   }}
                 />
                 Only selected team(s) can join
@@ -266,19 +283,27 @@ function Home() {
             </div>
           )}
 
-          {/* Auto-add-to-team is independent of accessMode above -- it
-              stays visible and usable whether the meeting is open or
-              restricted, since the two aren't mutually exclusive. */}
+          {/* Mutually exclusive with "restricted" above -- turning this on
+              switches accessMode back to "open" if "restricted" was
+              selected, and the checkbox is disabled while "restricted" is
+              active, so only one of the two can be in effect at once. */}
           {user && (
             <div className="auto-team-panel">
-              <label className="auto-team-checkbox">
+              <label className={`auto-team-checkbox ${accessMode === "restricted" ? "auto-team-checkbox-disabled" : ""}`}>
                 <input
                   type="checkbox"
                   checked={autoTeamEnabled}
-                  onChange={(e) => setAutoTeamEnabled(e.target.checked)}
+                  disabled={accessMode === "restricted"}
+                  onChange={(e) => {
+                    setAutoTeamEnabled(e.target.checked);
+                    if (e.target.checked) setAccessMode("open");
+                  }}
                 />
                 Automatically add everyone who joins to a team
               </label>
+              {accessMode === "restricted" && (
+                <p className="invite-panel-hint">Only available for open meetings — not while restricted to specific teams.</p>
+              )}
               {autoTeamEnabled && (
                 myTeams.length === 0 ? (
                   <p className="invite-panel-empty">
